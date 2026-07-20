@@ -29,6 +29,7 @@ from autoclipper.trending import get_trending_ideas
 from autoclipper.trending_youtube import fetch_trending, enrich_trending, CATEGORY_MAP
 from autoclipper.subtitles import build_ass, burn_ass
 from autoclipper.hooks import add_hook_to_video
+from autoclipper import voiceover as voiceover_mod
 from autoclipper.youtube_uploader import (
     get_auth_url,
     exchange_code,
@@ -673,6 +674,93 @@ async def hook_preview(req: HookPreviewRequest):
 
     return FileResponse(preview_path, media_type="image/png",
                         filename=preview_name)
+
+
+# --- Voice-over (Kokoro TTS locally + Gemini TTS fallback) --------------
+class VoiceOverRequest(BaseModel):
+    job_id: Optional[str] = None     # for generated clips
+    name: Optional[str] = None       # for library clips
+    filename: str
+    text: str
+    engine: str = "auto"             # auto | kokoro | gemini
+    voice: str = None
+    mode: str = "overlay"            # overlay (mix) | replace (dub)
+
+
+@app.post("/api/voiceover")
+async def voiceover(req: VoiceOverRequest, current: User = Depends(get_current_user)):
+    """Generate a voice-over for a clip and burn it into a new mp4.
+
+    engine='auto' picks Kokoro for English-ish text and Gemini for Indonesian
+    (Gemini needs the user's stored GEMINI_API_KEY).
+    """
+    if not req.text or not req.text.strip():
+        raise HTTPException(status_code=400, detail="Voice-over text is required")
+    if req.mode not in ("overlay", "replace"):
+        raise HTTPException(status_code=400, detail="mode must be 'overlay' or 'replace'")
+
+    # Resolve the source video.
+    if req.name:
+        output_dir = os.path.join(config.OUTPUT_ROOT, "library", req.name)
+    else:
+        if not req.job_id:
+            raise HTTPException(status_code=400, detail="job_id or name required")
+        output_dir = os.path.join(config.OUTPUT_ROOT, req.job_id)
+    video = os.path.join(output_dir, req.filename)
+    if not os.path.isfile(video):
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    base = os.path.splitext(req.filename)[0]
+    wav_name = f"{base}_vo.wav"
+    wav_path = os.path.join(output_dir, wav_name)
+    out_name = f"{base}_vo.mp4"
+    out_path = os.path.join(output_dir, out_name)
+
+    # Gemini key (for fallback / Indonesian) comes from the authenticated user.
+    from autoclipper.db import decrypt_value
+
+    gemini_key = decrypt_value(current.gemini_key) or config.GEMINI_API_KEY
+
+    try:
+        voiceover_mod.generate_voiceover(
+            req.text, wav_path, engine=req.engine, voice=req.voice, gemini_key=gemini_key
+        )
+        voiceover_mod.mix_voiceover(video, wav_path, out_path, mode=req.mode)
+    except Exception as e:  # noqa: BLE001
+        detail = f"Voice-over failed: {e}"
+        logger.warning(detail)
+        raise HTTPException(status_code=500, detail=detail)
+
+    return {"filename": out_name, "wav": wav_name}
+
+
+@app.post("/api/voiceover/preview")
+async def voiceover_preview(req: VoiceOverRequest, current: User = Depends(get_current_user)):
+    """Generate only the voice-over WAV (no video mix) for a quick listen."""
+    if not req.text or not req.text.strip():
+        raise HTTPException(status_code=400, detail="Voice-over text is required")
+
+    if req.name:
+        output_dir = os.path.join(config.OUTPUT_ROOT, "library", req.name)
+    else:
+        if not req.job_id:
+            raise HTTPException(status_code=400, detail="job_id or name required")
+        output_dir = os.path.join(config.OUTPUT_ROOT, req.job_id)
+    if not os.path.isfile(os.path.join(output_dir, req.filename)):
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    preview_name = f"vo_preview_{os.path.splitext(req.filename)[0]}.wav"
+    preview_path = os.path.join(output_dir, preview_name)
+    from autoclipper.db import decrypt_value
+
+    gemini_key = decrypt_value(current.gemini_key) or config.GEMINI_API_KEY
+    try:
+        voiceover_mod.generate_voiceover(
+            req.text, preview_path, engine=req.engine, voice=req.voice, gemini_key=gemini_key
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Preview failed: {e}")
+    return FileResponse(preview_path, media_type="audio/wav", filename=preview_name)
 
 
 # --- Saved Library -------------------------------------------------------

@@ -31,7 +31,8 @@ COPY . .
 
 ENV PYTHONUNBUFFERED=1
 ENV OUTPUT_ROOT=/app/output
-RUN mkdir -p /app/output /app/autoclipper/models
+ENV KOKORO_CACHE=/app/models/kokoro
+RUN mkdir -p /app/output /app/autoclipper/models /app/models/kokoro
 
 EXPOSE 8000
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

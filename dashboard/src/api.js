@@ -414,6 +414,38 @@ export async function youtubeUpload(payload) {
   return res.json()
 }
 
+export async function applyVoiceOver(payload) {
+  const res = await authFetch(`${API_URL}/api/voiceover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(detail || `Voice-over failed (${res.status})`)
+  }
+  return res.json()
+}
+
+export async function previewVoiceOver(payload) {
+  const res = await authFetch(`${API_URL}/api/voiceover/preview`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(detail || `Preview failed (${res.status})`)
+  }
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+export function voiceOverFileUrl(jobId, name, filename) {
+  if (name) return `${API_URL}/api/library/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`
+  return fileUrl(jobId, filename)
+}
+
 export async function runCleanup(hours) {
   const res = await fetch(`${API_URL}/api/cleanup`, {
     method: 'POST',

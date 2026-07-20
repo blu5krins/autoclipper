@@ -140,6 +140,30 @@ sends them in the request body.
 > account — the resulting OAuth token is stored encrypted per user (in the DB),
 > so every AutoClipper account uploads to its own YouTube channel.
 
+## Voice-Over
+
+Add a narrated audio track to any generated/library clip from the **Voice-Over** page
+(sidebar). Two engines:
+
+- **Kokoro** (default for English-ish text) — local, free, no API key. Runs in-container
+  via ONNX; the model is cached in the `kokoro_cache` volume.
+- **Gemini TTS** (default for Indonesian / when `engine=gemini`) — cloud TTS using the
+  user's stored `GEMINI_API_KEY`. More natural for Bahasa Indonesia.
+
+Engine selection is automatic (`auto`): English-like text → Kokoro, Indonesian → Gemini.
+You can also force an engine and pick a voice.
+
+Modes:
+- **Overlay** — original audio is mixed in (lowered) with the voice-over on top.
+- **Replace** — the voice-over dubs over the original audio (full replacement).
+
+Endpoints: `POST /api/voiceover` (burn), `POST /api/voiceover/preview` (listen to the
+generated WAV before burning). Both require authentication; the Gemini fallback uses the
+authenticated user's stored key.
+
+> Adding `kokoro` + `onnxruntime` increases the backend image size (~+500 MB) and the
+> first generation downloads the model (~300 MB, then cached).
+
 ## Backend API
 
 Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`). Per-job logs are captured via a contextvar-aware handler so concurrent jobs don't interleave. Output is written to `OUTPUT_ROOT/<job_id>/` (`OUTPUT_ROOT` defaults to `output`).
@@ -156,6 +180,8 @@ Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`)
 | GET | `/api/trending/youtube` | **Real** YouTube trending via Data API v3 (`region`, `category`, `window_days`, `enrich`). Falls back to the general list when a niche has no regional trending (`category_filtered: false`). |
 | POST | `/api/subtitle` | Generate + burn edited subtitles (karaoke highlight) into a clip. |
 | POST | `/api/hook` | Burn a viral hook text overlay onto a clip. |
+| POST | `/api/voiceover` | Generate + burn a voice-over (Kokoro/Gemini) into a clip. |
+| POST | `/api/voiceover/preview` | Generate only the voice-over WAV for a quick listen. |
 | GET | `/api/library` | List saved clips (manifest-driven). |
 | POST | `/api/library/save` | Save a generated clip into the library. |
 | POST | `/api/library/register` | Register a clip's metadata. |

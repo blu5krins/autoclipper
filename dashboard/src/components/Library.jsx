@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, Play, Download, Trash2, Youtube } from 'lucide-react'
+import { FolderOpen, Play, Download, Trash2, Youtube, AudioLines } from 'lucide-react'
 import { listLibrary, libraryFileUrl, deleteLibraryClip, deleteLibraryFolder } from '../api.js'
 import YouTubeUploadModal from './YouTubeUploadModal.jsx'
 
-export default function Library() {
+export default function Library({ onVoiceOver }) {
   const [items, setItems] = useState([])
   const [error, setError] = useState('')
   const [deleting, setDeleting] = useState(false)
@@ -135,6 +135,15 @@ export default function Library() {
                           >
                             <Trash2 size={13} /> Delete
                           </button>
+                          {onVoiceOver && (
+                            <button
+                              onClick={() => onVoiceOver({ name: vid.name, filename: c.file, hook: c.hook })}
+                              className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-purple-500/15 text-purple-300
+                                         hover:bg-purple-500/25 transition-colors flex items-center justify-center gap-1"
+                            >
+                              <AudioLines size={13} /> Voice-Over
+                            </button>
+                          )}
                           <button
                             onClick={() => setUploading({ name: vid.name, clip: c })}
                             className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-red-600/15 text-red-400

@@ -26,6 +26,12 @@ google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
 
+# Voice-over (local Kokoro TTS + Gemini TTS fallback)
+kokoro==0.7.1
+misaki==0.0.9
+onnxruntime==1.18.1
+soundfile==0.12.1
+
 # User accounts + auth (register/login, per-user API keys)
 sqlmodel>=0.0.22
 python-jose[cryptography]==3.3.0
