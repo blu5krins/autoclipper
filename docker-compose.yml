@@ -7,6 +7,7 @@ services:
     volumes:
       - ./output:/app/output
       - yt_config:/app/yt_config
+      - autoclipper_data:/app/data
       - ./client_secret.json:/app/client_secret.json:ro
     env_file:
       - .env
@@ -17,8 +18,6 @@ services:
       - YT_CONFIG_DIR=/app/yt_config
       - AUTOCLIPPER_SECRET=${AUTOCLIPPER_SECRET:-change-me-to-a-long-random-string}
       - AUTOCLIPPER_DB=/app/data/autoclipper.db
-    volumes:
-      - autoclipper_data:/app/data
     restart: unless-stopped
 
   frontend:

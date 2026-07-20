@@ -33,6 +33,7 @@ from autoclipper.youtube_uploader import (
     get_auth_url,
     exchange_code,
     is_authenticated,
+    is_user_authenticated,
     upload_video,
     has_client_secret,
 )
@@ -48,6 +49,8 @@ from autoclipper.db import (
     apply_settings,
     get_user_by_username,
     create_user,
+    save_youtube_token,
+    load_youtube_token,
 )
 from autoclipper.auth import (
     get_current_user,
@@ -788,15 +791,18 @@ class YouTubeUploadRequest(BaseModel):
 
 
 @app.get("/api/youtube/status")
-async def youtube_status():
+async def youtube_status(current: User = Depends(get_current_user)):
+    token_json = load_youtube_token(current)
     return {
         "configured": has_client_secret(),
-        "authenticated": is_authenticated(),
+        "authenticated": is_user_authenticated(token_json),
     }
 
 
 @app.post("/api/youtube/auth_url")
-async def youtube_auth_url(req: YouTubeAuthRequest):
+async def youtube_auth_url(
+    req: YouTubeAuthRequest, current: User = Depends(get_current_user)
+):
     if not has_client_secret():
         raise HTTPException(
             status_code=400,
@@ -809,16 +815,38 @@ async def youtube_auth_url(req: YouTubeAuthRequest):
 
 
 @app.post("/api/youtube/callback")
-async def youtube_callback(code: str, redirect_uri: str = None):
+async def youtube_callback(
+    code: str, redirect_uri: str = None, current: User = Depends(get_current_user)
+):
     ok = exchange_code(code, redirect_uri)
     if not ok:
         raise HTTPException(status_code=400, detail="Token exchange failed")
-    return {"ok": True, "authenticated": is_authenticated()}
+    # exchange_code persists the token to the global TOKEN_PATH; copy it onto
+    # the authenticated user (encrypted) and remove the shared global copy.
+    from autoclipper.youtube_uploader import TOKEN_PATH
+
+    if os.path.isfile(TOKEN_PATH):
+        try:
+            with open(TOKEN_PATH, "r", encoding="utf-8") as f:
+                token_json = f.read()
+            with user_db.Session(user_db.engine) as session:
+                db_user = session.get(User, current.id)
+                if db_user is not None:
+                    save_youtube_token(db_user, token_json)
+                    session.add(db_user)
+                    session.commit()
+            os.remove(TOKEN_PATH)
+        except OSError:
+            pass
+    return {"ok": True, "authenticated": is_authenticated(load_youtube_token(current))}
 
 
 @app.post("/api/youtube/upload")
-async def youtube_upload(req: YouTubeUploadRequest):
-    if not is_authenticated():
+async def youtube_upload(
+    req: YouTubeUploadRequest, current: User = Depends(get_current_user)
+):
+    token_json = load_youtube_token(current)
+    if not token_json or not is_authenticated(token_json):
         raise HTTPException(status_code=401, detail="Not authenticated with YouTube")
 
     # Resolve the source video file.
@@ -840,6 +868,14 @@ async def youtube_upload(req: YouTubeUploadRequest):
         if not os.path.isfile(thumb):
             thumb = None
 
+    def _on_token_changed(new_json: str):
+        with user_db.Session(user_db.engine) as session:
+            db_user = session.get(User, current.id)
+            if db_user is not None:
+                save_youtube_token(db_user, new_json)
+                session.add(db_user)
+                session.commit()
+
     try:
         result = upload_video(
             video,
@@ -847,6 +883,8 @@ async def youtube_upload(req: YouTubeUploadRequest):
             description=req.description,
             publish_at=req.publish_at,
             thumbnail_path=thumb,
+            token_json=token_json,
+            on_token_changed=_on_token_changed,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

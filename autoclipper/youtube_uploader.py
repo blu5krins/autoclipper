@@ -117,30 +117,62 @@ def exchange_code(code: str, redirect_uri: str = None) -> bool:
 
 
 def _save_token(creds: Credentials):
+    """Legacy global-token persistence (kept for backward compatibility)."""
     _ensure_dirs()
     with open(TOKEN_PATH, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
 
 
 def _load_token() -> Credentials | None:
+    """Legacy global-token loader (kept for backward compatibility)."""
     if not os.path.isfile(TOKEN_PATH):
         return None
     return Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
 
 
-def is_authenticated() -> bool:
-    creds = _load_token()
-    if creds is None:
-        return False
+def creds_from_json(token_json: str) -> Credentials:
+    """Rebuild Credentials from a stored JSON string (per-user token)."""
+    return Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+
+
+def _refresh_if_needed(creds: Credentials) -> tuple[Credentials, bool]:
+    """Refresh expired creds if possible. Returns (creds, changed)."""
     if creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-            _save_token(creds)
-            return True
+            return creds, True
         except Exception as e:  # noqa: BLE001
             logger.warning("YouTube token refresh failed: %s", e)
+    return creds, False
+
+
+def is_authenticated(token_json: str = None) -> bool:
+    """Check auth for a per-user token JSON (falls back to the global token)."""
+    if token_json:
+        try:
+            creds, _ = _refresh_if_needed(creds_from_json(token_json))
+            return not creds.expired
+        except Exception:  # noqa: BLE001
             return False
+    # Legacy global fallback.
+    creds = _load_token()
+    if creds is None:
+        return False
+    creds, changed = _refresh_if_needed(creds)
+    if changed:
+        _save_token(creds)
     return not creds.expired
+
+
+def is_user_authenticated(token_json: str | None) -> bool:
+    """Strict per-user check: only True if THIS user has a valid token."""
+    if not token_json:
+        return False
+    try:
+        creds, _ = _refresh_if_needed(creds_from_json(token_json))
+        return not creds.expired
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def upload_video(
@@ -149,19 +181,29 @@ def upload_video(
     description: str = "",
     publish_at: str = None,
     thumbnail_path: str = None,
+    token_json: str = None,
+    on_token_changed=None,
 ) -> dict:
     """Upload a video as a YouTube Short.
 
     publish_at: ISO 8601 datetime string (e.g. '2026-07-20T10:00:00Z').
     If set, the video is scheduled privately and goes public at that time.
+    token_json: per-user OAuth token JSON. If None, the legacy global token
+    is used. on_token_changed(creds_json) is called when the token is refreshed.
     Returns the API response dict (contains 'id').
     """
-    creds = _load_token()
+    if token_json:
+        creds = creds_from_json(token_json)
+    else:
+        creds = _load_token()
     if creds is None:
         raise RuntimeError("Not authenticated with YouTube")
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        _save_token(creds)
+    creds, changed = _refresh_if_needed(creds)
+    if changed:
+        if on_token_changed:
+            on_token_changed(creds.to_json())
+        else:
+            _save_token(creds)
 
     youtube = build(API_SERVICE_NAME, API_VERSION, credentials=creds)
 

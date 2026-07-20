@@ -369,13 +369,13 @@ export async function hookPreview(jobId, filename, text, position = 'top', fontS
 }
 
 export async function youtubeStatus() {
-  const res = await fetch(`${API_URL}/api/youtube/status`)
+  const res = await authFetch(`${API_URL}/api/youtube/status`)
   if (!res.ok) throw new Error('YouTube status failed')
   return res.json()
 }
 
 export async function youtubeAuthUrl(redirectUri) {
-  const res = await fetch(`${API_URL}/api/youtube/auth_url`, {
+  const res = await authFetch(`${API_URL}/api/youtube/auth_url`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ redirect_uri: redirectUri || undefined }),
@@ -389,7 +389,7 @@ export async function youtubeAuthUrl(redirectUri) {
 }
 
 export async function youtubeCallback(code, redirectUri) {
-  const res = await fetch(`${API_URL}/api/youtube/callback?code=${encodeURIComponent(code)}${redirectUri ? `&redirect_uri=${encodeURIComponent(redirectUri)}` : ''}`, {
+  const res = await authFetch(`${API_URL}/api/youtube/callback?code=${encodeURIComponent(code)}${redirectUri ? `&redirect_uri=${encodeURIComponent(redirectUri)}` : ''}`, {
     method: 'POST',
   })
   if (!res.ok) {
@@ -401,7 +401,7 @@ export async function youtubeCallback(code, redirectUri) {
 }
 
 export async function youtubeUpload(payload) {
-  const res = await fetch(`${API_URL}/api/youtube/upload`, {
+  const res = await authFetch(`${API_URL}/api/youtube/upload`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

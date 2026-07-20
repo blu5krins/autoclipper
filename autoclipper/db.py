@@ -74,6 +74,7 @@ class User(SQLModel, table=True):
     gemini_model: str | None = None
     whisper_model: str | None = None
     youtube_cookies: str | None = None
+    youtube_token: str | None = None  # encrypted JSON of the OAuth credentials
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -153,3 +154,13 @@ def apply_settings(user: User, data: UserSettingsUpdate) -> None:
         user.whisper_model = data.whisper_model
     if data.youtube_cookies is not None:
         user.youtube_cookies = encrypt_value(data.youtube_cookies)
+
+
+def save_youtube_token(user: User, token_json: str) -> None:
+    """Encrypt and store the user's YouTube OAuth token (JSON string)."""
+    user.youtube_token = encrypt_value(token_json)
+
+
+def load_youtube_token(user: User) -> Optional[str]:
+    """Return the user's YouTube OAuth token JSON, decrypted (or None)."""
+    return decrypt_value(user.youtube_token)

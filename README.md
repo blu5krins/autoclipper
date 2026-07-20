@@ -135,8 +135,10 @@ sends them in the request body.
   `Bearer` token. Other routes (status, files, library, YouTube upload) remain open for
   local/single-user use.
 
-> **Note:** The YouTube OAuth upload token is still shared server-wide (single
-> `client_secret.json`). Per-user YouTube accounts are a planned follow-up.
+> **Note:** The YouTube OAuth `client_secret.json` is still shared server-wide
+> (one Google Cloud OAuth app), but each user connects their **own** YouTube
+> account — the resulting OAuth token is stored encrypted per user (in the DB),
+> so every AutoClipper account uploads to its own YouTube channel.
 
 ## Backend API
 
