@@ -118,6 +118,26 @@ npm run lint         # ESLint, --max-warnings 0
 
 The frontend proxies `/api` calls to the backend at `http://localhost:8000` (override with `VITE_API_URL`).
 
+## Accounts & Per-User API Keys
+
+AutoClipper has optional user accounts. Each user registers with a username/password
+and stores their own API keys (Groq, Gemini, YouTube) on the server — encrypted at rest
+with Fernet. Keys are resolved automatically per request, so the dashboard no longer
+sends them in the request body.
+
+- **Storage:** SQLite (`autoclipper.db`, mounted to the `autoclipper_data` volume in Docker).
+- **Encryption:** `AUTOCLIPPER_SECRET` signs JWTs and derives the Fernet key. **Set this
+  to a long random value in production** — if unset, an ephemeral key is used and stored
+  keys cannot survive a restart.
+- **Endpoints:** `POST /api/auth/register`, `POST /api/auth/login` (returns a JWT),
+  `GET /api/auth/me`, `GET /api/auth/settings`, `PUT /api/auth/settings`.
+- **Protected routes:** `/api/process`, `/api/trending`, `/api/trending/youtube` require a
+  `Bearer` token. Other routes (status, files, library, YouTube upload) remain open for
+  local/single-user use.
+
+> **Note:** The YouTube OAuth upload token is still shared server-wide (single
+> `client_secret.json`). Per-user YouTube accounts are a planned follow-up.
+
 ## Backend API
 
 Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`). Per-job logs are captured via a contextvar-aware handler so concurrent jobs don't interleave. Output is written to `OUTPUT_ROOT/<job_id>/` (`OUTPUT_ROOT` defaults to `output`).

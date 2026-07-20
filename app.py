@@ -18,7 +18,7 @@ import shutil
 import time
 import uuid
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -35,6 +35,26 @@ from autoclipper.youtube_uploader import (
     is_authenticated,
     upload_video,
     has_client_secret,
+)
+from autoclipper import db as user_db
+from autoclipper import auth as auth_mod
+from autoclipper.db import (
+    User,
+    UserCreate,
+    UserLogin,
+    UserSettingsUpdate,
+    UserPublic,
+    settings_for,
+    apply_settings,
+    get_user_by_username,
+    create_user,
+)
+from autoclipper.auth import (
+    get_current_user,
+    hash_password,
+    verify_password,
+    create_access_token,
+    public_user,
 )
 from autoclipper.utils import ensure_ffmpeg, logger as ac_logger, sanitize_filename, write_json
 
@@ -95,6 +115,7 @@ async def _cleanup_loop():
 
 @app.on_event("startup")
 async def _startup_cleanup():
+    user_db.init_db()
     asyncio.create_task(_cleanup_loop())
 
 
@@ -178,6 +199,62 @@ async def root():
     return {"name": "AutoClipper API", "version": "0.1.0", "jobs": len(jobs)}
 
 
+# --- Auth (register / login / per-user settings) ------------------------
+@app.post("/api/auth/register", response_model=UserPublic)
+async def register(req: UserCreate):
+    """Create a new account. Username must be unique."""
+    if not req.username or not req.password:
+        raise HTTPException(status_code=400, detail="Username and password are required.")
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    with user_db.Session(user_db.engine) as session:
+        if get_user_by_username(session, req.username):
+            raise HTTPException(status_code=409, detail="Username already taken.")
+        user = create_user(session, req, hash_password(req.password))
+    return public_user(user)
+
+
+@app.post("/api/auth/login")
+async def login(req: UserLogin):
+    """Authenticate and return a JWT access token."""
+    with user_db.Session(user_db.engine) as session:
+        user = get_user_by_username(session, req.username)
+        if not user or not verify_password(req.password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid username or password.")
+    token = create_access_token(user.username)
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@app.get("/api/auth/me", response_model=UserPublic)
+async def me(current: User = Depends(get_current_user)):
+    """Return the authenticated user's public profile."""
+    return public_user(current)
+
+
+@app.get("/api/auth/settings", response_model=None)
+async def get_settings(current: User = Depends(get_current_user)):
+    """Return the user's stored settings (keys decrypted for display)."""
+    return settings_for(current)
+
+
+@app.put("/api/auth/settings", response_model=None)
+async def update_settings(
+    req: UserSettingsUpdate,
+    current: User = Depends(get_current_user),
+):
+    """Update the user's stored settings (keys re-encrypted at rest)."""
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+        apply_settings(db_user, req)
+        session.add(db_user)
+        session.commit()
+        session.refresh(db_user)
+        result = settings_for(db_user)
+    return result
+
+
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
     """Upload a raw file and return its server-side filename (in uploads/)."""
@@ -210,8 +287,23 @@ async def process(
     min_clip: float = Form(None),
     max_clip: float = Form(None),
     content_type: str = Form("general"),
+    current: User = Depends(get_current_user),
 ):
     ensure_ffmpeg()
+
+    # Per-user keys take precedence; fall back to the server's .env keys.
+    from autoclipper.db import decrypt_value
+
+    if not groq_key:
+        groq_key = decrypt_value(current.groq_key) or config.GROQ_API_KEY
+    if not gemini_key:
+        gemini_key = decrypt_value(current.gemini_key) or config.GEMINI_API_KEY
+    if not whisper_model and current.whisper_model:
+        whisper_model = current.whisper_model
+    if not gemini_model and current.gemini_model:
+        gemini_model = current.gemini_model
+    if not youtube_cookies and current.youtube_cookies:
+        youtube_cookies = decrypt_value(current.youtube_cookies)
 
     # Single-step upload: stream the posted file straight into the pipeline.
     if file is not None:
@@ -393,8 +485,15 @@ async def get_file(job_id: str, filename: str):
 
 @app.get("/api/trending")
 async def trending(niche: str = "general", count: int = 10,
-                   gemini_key: str = None, gemini_model: str = None):
+                   gemini_key: str = None, gemini_model: str = None,
+                   current: User = Depends(get_current_user)):
     """Return AI-generated trending short-video ideas for a niche."""
+    from autoclipper.db import decrypt_value
+
+    if not gemini_key:
+        gemini_key = decrypt_value(current.gemini_key) or config.GEMINI_API_KEY
+    if not gemini_model and current.gemini_model:
+        gemini_model = current.gemini_model
     try:
         ideas = get_trending_ideas(
             niche=niche, api_key=gemini_key, model=gemini_model, count=count
@@ -414,6 +513,7 @@ async def trending_youtube(
     gemini_key: str = None,
     gemini_model: str = None,
     enrich: bool = True,
+    current: User = Depends(get_current_user),
 ):
     """Return Explore-style most-popular YouTube videos for a region/category.
 
@@ -421,9 +521,17 @@ async def trending_youtube(
     (per-category destination pages). This mirrors that by pulling
     videos.list chart=mostPopular for the region and filtering by the
     chosen Explore category (Music, Gaming, News, ...). Shorts are
-    filtered out; podcast mode keeps only longer talk videos.
+    filtered out; podcast mode keeps only longer-form videos (>10 min).
     `category` is one of the EXPLORE_CATEGORIES ids.
     """
+    from autoclipper.db import decrypt_value
+
+    if not youtube_key:
+        youtube_key = decrypt_value(current.youtube_api_key) or config.YOUTUBE_API_KEY
+    if not gemini_key:
+        gemini_key = decrypt_value(current.gemini_key) or config.GEMINI_API_KEY
+    if not gemini_model and current.gemini_model:
+        gemini_model = current.gemini_model
     api_key = youtube_key or config.YOUTUBE_API_KEY
     try:
         videos = fetch_trending(

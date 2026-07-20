@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { LayoutDashboard, FolderOpen, Scissors, Settings as SettingsIcon, Flame } from 'lucide-react'
-import { submitJob, getStatus } from './api.js'
+import { LayoutDashboard, FolderOpen, Scissors, Settings as SettingsIcon, Flame, LogOut } from 'lucide-react'
+import { submitJob, getStatus, isLoggedIn, setToken, fetchSettings } from './api.js'
 import SubmitForm from './components/SubmitForm.jsx'
 import LogConsole from './components/LogConsole.jsx'
 import ClipGrid from './components/ClipGrid.jsx'
 import Library from './components/Library.jsx'
 import SettingsPage from './components/SettingsPage.jsx'
 import TrendingPage from './components/TrendingPage.jsx'
+import AuthPage from './components/AuthPage.jsx'
 
 const DEFAULT_SETTINGS = {
   groqKey: '',
@@ -33,6 +34,7 @@ function loadSettings() {
 }
 
 export default function App() {
+  const [authed, setAuthed] = useState(isLoggedIn())
   const [tab, setTab] = useState('generator')
   const [settings, setSettings] = useState(loadSettings)
   const [job, setJob] = useState(null)
@@ -40,11 +42,42 @@ export default function App() {
   const [error, setError] = useState('')
   const pollRef = useRef(null)
 
+  // Load the user's server-side settings (API keys) after login.
+  useEffect(() => {
+    if (!authed) return
+    fetchSettings()
+      .then((s) => {
+        setSettings((prev) => ({
+          ...DEFAULT_SETTINGS,
+          ...prev,
+          groqKey: s.groqKey || '',
+          geminiKey: s.geminiKey || '',
+          youtubeApiKey: s.youtubeApiKey || '',
+          geminiModel: s.geminiModel || '',
+          whisperModel: s.whisperModel || '',
+          youtubeCookies: s.youtubeCookies || '',
+        }))
+      })
+      .catch(() => {})
+  }, [authed])
+
+  // Redirect to login if the server rejects our token.
+  useEffect(() => {
+    const onUnauthorized = () => setAuthed(false)
+    window.addEventListener('ac:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('ac:unauthorized', onUnauthorized)
+  }, [])
+
   useEffect(() => {
     localStorage.setItem('ac_settings', JSON.stringify(settings))
   }, [settings])
 
   useEffect(() => () => clearInterval(pollRef.current), [])
+
+  function handleLogout() {
+    setToken('')
+    setAuthed(false)
+  }
 
   async function startPolling(jobId) {
     clearInterval(pollRef.current)
@@ -74,13 +107,8 @@ export default function App() {
       subtitles: settings.subtitles,
       force_hd: settings.forceHd,
     }
-    if (settings.youtubeCookies && settings.youtubeCookies.trim()) {
-      opts.youtube_cookies = settings.youtubeCookies
-    }
-    if (settings.groqKey) opts.groq_key = settings.groqKey
-    if (settings.geminiKey) opts.gemini_key = settings.geminiKey
-    if (settings.whisperModel) opts.whisper_model = settings.whisperModel
-    if (settings.geminiModel) opts.gemini_model = settings.geminiModel
+    // API keys are resolved server-side from the authenticated user's
+    // stored settings, so we no longer send them in the request body.
     // Clip generation params come from the Clip Generator form (payload),
     // falling back to saved settings if the form didn't send them.
     if (payload.clipCount) opts.clip_count = payload.clipCount
@@ -118,6 +146,10 @@ export default function App() {
         },
       }
     })
+  }
+
+  if (!authed) {
+    return <AuthPage onAuthed={() => setAuthed(true)} />
   }
 
   return (
@@ -168,7 +200,14 @@ export default function App() {
         </div>
 
         <div className="p-4 border-t border-white/5">
-          <p className="text-[10px] text-zinc-500 hidden lg:block leading-relaxed">
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+          >
+            <LogOut size={20} />
+            <span className="font-medium hidden lg:block">Sign out</span>
+          </button>
+          <p className="text-[10px] text-zinc-500 hidden lg:block leading-relaxed mt-3">
             Groq Whisper + Gemini powered vertical shorts.
           </p>
         </div>

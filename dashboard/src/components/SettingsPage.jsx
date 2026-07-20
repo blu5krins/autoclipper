@@ -2,17 +2,43 @@ import { useState } from 'react'
 import { KeyRound, Cpu, ToggleLeft, Save, Check, Trash2 } from 'lucide-react'
 import SettingsPanel from './SettingsPanel.jsx'
 import YouTubeSettings from './YouTubeSettings.jsx'
-import { runCleanup } from '../api.js'
+import { runCleanup, saveSettings } from '../api.js'
 
 export default function SettingsPage({ settings, setSettings }) {
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveErr, setSaveErr] = useState('')
   const [cleaning, setCleaning] = useState(false)
   const [cleanMsg, setCleanMsg] = useState('')
 
-  function handleSave() {
-    localStorage.setItem('ac_settings', JSON.stringify(settings))
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  async function handleSave() {
+    setSaving(true)
+    setSaveErr('')
+    try {
+      const updated = await saveSettings({
+        groqKey: settings.groqKey || '',
+        geminiKey: settings.geminiKey || '',
+        youtubeApiKey: settings.youtubeApiKey || '',
+        geminiModel: settings.geminiModel || '',
+        whisperModel: settings.whisperModel || '',
+        youtubeCookies: settings.youtubeCookies || '',
+      })
+      setSettings((prev) => ({
+        ...prev,
+        groqKey: updated.groqKey || '',
+        geminiKey: updated.geminiKey || '',
+        youtubeApiKey: updated.youtubeApiKey || '',
+        geminiModel: updated.geminiModel || '',
+        whisperModel: updated.whisperModel || '',
+        youtubeCookies: updated.youtubeCookies || '',
+      }))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e) {
+      setSaveErr(e.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -64,7 +90,7 @@ export default function SettingsPage({ settings, setSettings }) {
                        font-mono focus:outline-none focus:border-primary resize-y"
           />
           <p className="text-xs text-zinc-500 mt-2">
-            Stored only in your browser (localStorage) and sent per-request. Never stored on the server.
+            Stored encrypted on the server, tied to your account. Sent to the AI providers only when you run a job.
           </p>
         </section>
 
@@ -132,19 +158,21 @@ export default function SettingsPage({ settings, setSettings }) {
             />
           </div>
           <p className="text-xs text-zinc-500 mt-3">
-            Keys are stored locally in your browser (localStorage) and sent only when needed.
-            They are never stored on the server.
+            Your API keys are saved to your account on the server (encrypted at rest) and
+            used automatically for every job — no need to re-enter them.
           </p>
         </section>
 
         <div className="flex justify-end pt-2">
           <button
             onClick={handleSave}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary hover:bg-blue-600 text-white text-sm font-medium transition-colors"
+            disabled={saving}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary hover:bg-blue-600 text-white text-sm font-medium transition-colors disabled:opacity-50"
           >
             {saved ? <Check size={16} /> : <Save size={16} />}
-            {saved ? 'Saved' : 'Save'}
+            {saving ? 'Saving…' : saved ? 'Saved' : 'Save'}
           </button>
+          {saveErr && <p className="text-xs text-red-400 mt-2">{saveErr}</p>}
         </div>
       </div>
     </div>

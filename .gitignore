@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .env
 client_secret.json
+autoclipper.db
 output/
 uploads/
 *.mp4

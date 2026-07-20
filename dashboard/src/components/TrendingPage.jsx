@@ -57,10 +57,6 @@ export default function TrendingPage({ settings }) {
   }
 
   async function generate() {
-    if (!settings?.youtubeApiKey) {
-      setError('YouTube Data API Key belum diisi di Settings. Tambahkan dulu untuk memuat video Explore.')
-      return
-    }
     setLoading(true)
     setError('')
     const controller = new AbortController()
@@ -70,9 +66,6 @@ export default function TrendingPage({ settings }) {
         region,
         category,
         maxResults,
-        youtubeKey: settings?.youtubeApiKey || undefined,
-        geminiKey: settings?.geminiKey || undefined,
-        geminiModel: settings?.geminiModel || undefined,
       }, { signal: controller.signal })
       const vids = res.videos || []
       setVideos(vids)
@@ -92,7 +85,7 @@ export default function TrendingPage({ settings }) {
 
   // Auto-load on mount / when category+region change.
   useEffect(() => {
-    if (settings?.youtubeApiKey) generate()
+    generate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, region])
 

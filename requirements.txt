@@ -25,3 +25,10 @@ Pillow
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
+
+# User accounts + auth (register/login, per-user API keys)
+sqlmodel>=0.0.22
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.3
+python-multipart==0.0.20

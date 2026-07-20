@@ -1,5 +1,92 @@
 export const API_URL = import.meta.env.VITE_API_URL || ''
 
+// --- Auth token (client-side session) ----------------------------------
+const TOKEN_KEY = 'ac_token'
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || ''
+}
+
+export function setToken(token) {
+  if (token) localStorage.setItem(TOKEN_KEY, token)
+  else localStorage.removeItem(TOKEN_KEY)
+}
+
+export function isLoggedIn() {
+  return Boolean(getToken())
+}
+
+export async function login(username, password) {
+  const res = await fetch(`${API_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(detail || `Login failed (${res.status})`)
+  }
+  const data = await res.json()
+  setToken(data.access_token)
+  return data
+}
+
+export async function register(username, password) {
+  const res = await fetch(`${API_URL}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(detail || `Register failed (${res.status})`)
+  }
+  return res.json()
+}
+
+export async function fetchSettings() {
+  const res = await authFetch(`${API_URL}/api/auth/settings`)
+  if (!res.ok) throw new Error('Failed to load settings')
+  return res.json()
+}
+
+export async function saveSettings(settings) {
+  const payload = {
+    groq_key: settings.groqKey || '',
+    gemini_key: settings.geminiKey || '',
+    youtube_api_key: settings.youtubeApiKey || '',
+    gemini_model: settings.geminiModel || '',
+    whisper_model: settings.whisperModel || '',
+    youtube_cookies: settings.youtubeCookies || '',
+  }
+  const res = await authFetch(`${API_URL}/api/auth/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(detail || 'Failed to save settings')
+  }
+  return res.json()
+}
+
+// Authenticated fetch with the bearer token; 401 triggers logout.
+export async function authFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) }
+  const token = getToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const res = await fetch(url, { ...options, headers })
+  if (res.status === 401) {
+    setToken('')
+    window.dispatchEvent(new Event('ac:unauthorized'))
+  }
+  return res
+}
+
 export async function submitJob(payload, file, onProgress) {
   // Backend /api/process expects multipart/form-data (Form fields), so we
   // always send FormData — with a 'file' for uploads or 'source' for URLs.
@@ -8,7 +95,7 @@ export async function submitJob(payload, file, onProgress) {
     for (const [k, v] of Object.entries(payload)) {
       if (v !== undefined && v !== null) fd.append(k, String(v))
     }
-    const res = await fetch(`${API_URL}/api/process`, { method: 'POST', body: fd })
+    const res = await authFetch(`${API_URL}/api/process`, { method: 'POST', body: fd })
     if (!res.ok) {
       let detail = ''
       try {
@@ -46,11 +133,18 @@ export async function submitJob(payload, file, onProgress) {
         } catch {
           /* ignore */
         }
+        // Surface 401 as a clear message so the UI can redirect to login.
+        if (xhr.status === 401) {
+          setToken('')
+          window.dispatchEvent(new Event('ac:unauthorized'))
+        }
         reject(new Error(`Submit failed (${xhr.status}) ${detail}`))
       }
     }
     xhr.onerror = () => reject(new Error('Network error'))
     xhr.open('POST', `${API_URL}/api/process`)
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
     xhr.send(fd)
   })
 }
@@ -349,13 +443,13 @@ export function parseSrt(text) {
   return cues
 }
 
-export async function getTrending({ niche, count, geminiKey, geminiModel }) {
+export async function getTrending({ niche, count }, opts = {}) {
   const params = new URLSearchParams()
   if (niche) params.set('niche', niche)
   if (count) params.set('count', String(count))
-  if (geminiKey) params.set('gemini_key', geminiKey)
-  if (geminiModel) params.set('gemini_model', geminiModel)
-  const res = await fetch(`${API_URL}/api/trending?${params.toString()}`)
+  const res = await authFetch(`${API_URL}/api/trending?${params.toString()}`, {
+    signal: opts.signal,
+  })
   if (!res.ok) {
     let detail = ''
     try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
@@ -364,17 +458,14 @@ export async function getTrending({ niche, count, geminiKey, geminiModel }) {
   return res.json()
 }
 
-export async function getYoutubeTrending({ region, category, maxResults, windowDays, youtubeKey, geminiKey, geminiModel, enrich }, opts = {}) {
+export async function getYoutubeTrending({ region, category, maxResults, windowDays, enrich }, opts = {}) {
   const params = new URLSearchParams()
   if (region) params.set('region', region)
   if (category) params.set('category', category)
   if (maxResults) params.set('max_results', String(maxResults))
   if (windowDays) params.set('window_days', String(windowDays))
-  if (youtubeKey) params.set('youtube_key', youtubeKey)
-  if (geminiKey) params.set('gemini_key', geminiKey)
-  if (geminiModel) params.set('gemini_model', geminiModel)
   if (enrich === false) params.set('enrich', 'false')
-  const res = await fetch(`${API_URL}/api/trending/youtube?${params.toString()}`, {
+  const res = await authFetch(`${API_URL}/api/trending/youtube?${params.toString()}`, {
     signal: opts.signal,
   })
   if (!res.ok) {
