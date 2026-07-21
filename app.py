@@ -167,7 +167,8 @@ ac_logger.setLevel(logging.INFO)
 
 # --- Request models -------------------------------------------------------
 class SubtitleRequest(BaseModel):
-    job_id: str
+    name: Optional[str] = None        # library folder name
+    job_id: Optional[str] = None      # or a processing job id (one of name/job_id required)
     filename: str
     cues: list  # [{"start": float, "end": float, "text": str}]
     style: dict = {}
@@ -283,6 +284,7 @@ async def process(
     vertical: bool = Form(True),
     use_yolo: bool = Form(True),
     subtitles: bool = Form(True),
+    split_screen: bool = Form(False),
     force_hd: bool = Form(False),
     youtube_cookies: str = Form(None),
     groq_key: str = Form(None),
@@ -342,6 +344,7 @@ async def process(
         "vertical": vertical,
         "use_yolo": use_yolo,
         "subtitles": subtitles,
+        "split_screen": split_screen,
         "force_hd": force_hd,
         "cookies_text": youtube_cookies,
         "groq_key": groq_key,
@@ -581,7 +584,12 @@ def trending_youtube_category(category: str) -> str:
 
 @app.post("/api/subtitle")
 async def subtitle(req: SubtitleRequest):
-    output_dir = os.path.join(config.OUTPUT_ROOT, req.job_id)
+    if req.name:
+        output_dir = os.path.join(config.OUTPUT_ROOT, "library", req.name)
+    elif req.job_id:
+        output_dir = os.path.join(config.OUTPUT_ROOT, req.job_id)
+    else:
+        raise HTTPException(status_code=400, detail="name or job_id required")
     video = os.path.join(output_dir, req.filename)
     if not os.path.isfile(video):
         raise HTTPException(status_code=404, detail="Clip not found")
@@ -598,6 +606,40 @@ async def subtitle(req: SubtitleRequest):
         burn_ass(video, ass_path, out_path)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=f"Burn failed: {e}")
+
+    # Save to library manifest if name is provided (same pattern as /api/enhance)
+    if req.name:
+        manifest_path = os.path.join(output_dir, "manifest.json")
+        if os.path.isfile(manifest_path):
+            from autoclipper.utils import write_json
+            import json as _json
+            with open(manifest_path, "r", encoding="utf-8") as _mf:
+                manifest = _json.load(_mf)
+            orig_entry = None
+            for c in manifest.get("clips", []):
+                if c.get("file") == req.filename:
+                    orig_entry = c
+                    break
+            if orig_entry is None:
+                base_name = os.path.splitext(req.filename)[0]
+                idx = int("".join(filter(str.isdigit, base_name)) or "0")
+                for c in manifest.get("clips", []):
+                    if c.get("index") == idx:
+                        orig_entry = c
+                        break
+            if orig_entry is not None:
+                edited_entry = dict(orig_entry)
+                edited_entry["file"] = out_name
+                edited_entry["subtitled"] = True
+                found = False
+                for i, c in enumerate(manifest.get("clips", [])):
+                    if c.get("file") == out_name:
+                        manifest["clips"][i] = edited_entry
+                        found = True
+                        break
+                if not found:
+                    manifest.setdefault("clips", []).append(edited_entry)
+                write_json(manifest_path, manifest)
 
     return {"filename": out_name}
 
@@ -628,10 +670,13 @@ async def hook(req: HookRequest):
     out_path = os.path.join(output_dir, out_name)
 
     try:
+        size_scale = {"S": 0.7, "L": 1.4}.get((req.size or "M").upper(), 1.0)
+        font_scale = req.font_scale * size_scale
+        duration = req.hold_seconds if req.hold_seconds and req.hold_seconds > 0 else None
         add_hook_to_video(
             video, req.text, out_path,
-            position=req.position, font_scale=req.font_scale,
-            size=req.size, entrance=req.entrance, hold_seconds=req.hold_seconds,
+            position=req.position, font_scale=font_scale,
+            duration=duration, style="classic",
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Hook failed: {e}")
@@ -763,6 +808,343 @@ async def voiceover_preview(req: VoiceOverRequest, current: User = Depends(get_c
     return FileResponse(preview_path, media_type="audio/wav", filename=preview_name)
 
 
+# --- Enhance (Hook + Voice-Over in one pass) ------------------------------
+
+class EnhanceRequest(BaseModel):
+    name: Optional[str] = None        # library folder name
+    job_id: Optional[str] = None     # or a processing job id
+    filename: str                     # clip file inside the folder/job
+    # Hook overlay (optional)
+    hook_text: str = ""
+    hook_position: str = "top"       # top | center | bottom
+    hook_size: str = "M"             # S | M | L (maps to font_scale)
+    hook_style: str = "classic"      # classic | dark | yellow | red | outline | outline_yellow
+    hook_hold: float = 5.0           # seconds the hook stays (0/None = whole clip)
+    # Voice-over (optional)
+    vo_text: str = ""
+    vo_engine: str = "kokoro"        # kokoro | gemini | auto
+    vo_voice: str = ""
+    vo_mode: str = "overlay"         # overlay | replace
+    vo_extend: bool = True           # if hook+vo: prepend intro (hook+vo) then play clip
+
+
+@app.post("/api/enhance")
+async def enhance(req: EnhanceRequest, current: User = Depends(get_current_user)):
+    """Burn a viral hook AND/OR a voice-over onto a clip in a single pass.
+
+    Either `hook_text` or `vo_text` (or both) may be provided. The hook is
+    burned first, then the voice-over (if any) is mixed into the result.
+    """
+    if not req.hook_text.strip() and not req.vo_text.strip():
+        raise HTTPException(status_code=400, detail="Provide hook_text or vo_text (or both).")
+
+    if req.name:
+        output_dir = os.path.join(config.OUTPUT_ROOT, "library", req.name)
+    else:
+        if not req.job_id:
+            raise HTTPException(status_code=400, detail="name or job_id required")
+        output_dir = os.path.join(config.OUTPUT_ROOT, req.job_id)
+    video = os.path.join(output_dir, req.filename)
+    if not os.path.isfile(video):
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    from autoclipper import hooks as _hooks
+    from autoclipper.db import decrypt_value
+
+    gemini_key = decrypt_value(current.gemini_key) or config.GEMINI_API_KEY
+    base = os.path.splitext(req.filename)[0]
+    step_path = video
+
+    orig_entry = None
+    try:
+        both = bool(req.hook_text.strip()) and bool(req.vo_text.strip())
+        created_paths = []
+
+        if both and req.vo_extend:
+            font_scale = {"S": 0.8, "M": 1.0, "L": 1.25}.get(req.hook_size, 1.0)
+            vo_wav = os.path.join(output_dir, f"vo_{base}.wav")
+            voiceover_mod.generate_voiceover(
+                req.vo_text, vo_wav, engine=req.vo_engine,
+                voice=req.vo_voice or None, gemini_key=gemini_key,
+            )
+            created_paths.append(vo_wav)
+            vo_dur = voiceover_mod.wav_duration(vo_wav)
+            intro_dur = max(req.hook_hold if req.hook_hold and req.hook_hold > 0 else 0.0, vo_dur)
+            intro_path = os.path.join(output_dir, f"intro_{base}.mp4")
+            voiceover_mod.build_intro(
+                video, vo_wav, intro_path,
+                hook_text=req.hook_text, hook_position=req.hook_position,
+                font_scale=font_scale, style=req.hook_style, duration=intro_dur,
+            )
+            created_paths.append(intro_path)
+            final_out = os.path.join(output_dir, f"enhanced_{base}.mp4")
+            voiceover_mod.concat_videos(intro_path, video, final_out)
+            step_path = final_out
+        else:
+            hook_out = None
+            vo_wav = None
+            final_out = None
+
+            # 1) Hook overlay (if requested)
+            if req.hook_text.strip():
+                hook_out = os.path.join(output_dir, f"hook_{base}.mp4")
+                font_scale = {"S": 0.8, "M": 1.0, "L": 1.25}.get(req.hook_size, 1.0)
+                duration = req.hook_hold if req.hook_hold and req.hook_hold > 0 else None
+                _hooks.add_hook_to_video(
+                    step_path, req.hook_text, hook_out,
+                    position=req.hook_position, font_scale=font_scale,
+                    duration=duration, style=req.hook_style,
+                )
+                step_path = hook_out
+
+            # 2) Voice-over (if requested)
+            if req.vo_text.strip():
+                vo_wav = os.path.join(output_dir, f"vo_{base}.wav")
+                voiceover_mod.generate_voiceover(
+                    req.vo_text, vo_wav, engine=req.vo_engine,
+                    voice=req.vo_voice or None, gemini_key=gemini_key,
+                )
+                created_paths.append(vo_wav)
+                final_out = os.path.join(output_dir, f"enhanced_{base}.mp4")
+                voiceover_mod.mix_voiceover(step_path, vo_wav, final_out, mode=req.vo_mode)
+                if hook_out is not None:
+                    created_paths.append(hook_out)  # hook was intermediate
+                step_path = final_out
+
+        # Remove all intermediate files (vo_wav, intro, hook if not final)
+        for p in created_paths:
+            if os.path.isfile(p) and p != step_path:
+                os.remove(p)
+
+        # Update library manifest so the enhanced clip appears with its metadata
+        if req.name:
+            manifest_path = os.path.join(output_dir, "manifest.json")
+            if os.path.isfile(manifest_path):
+                from autoclipper.utils import write_json
+                import json as _json
+                with open(manifest_path, "r", encoding="utf-8") as _mf:
+                    manifest = _json.load(_mf)
+                # Find the matching original clip entry
+                orig_entry = None
+                for c in manifest.get("clips", []):
+                    if c.get("file") == req.filename:
+                        orig_entry = c
+                        break
+                if orig_entry is None:
+                    base = os.path.splitext(req.filename)[0]
+                    idx = int("".join(filter(str.isdigit, base)) or "0")
+                    for c in manifest.get("clips", []):
+                        if c.get("index") == idx:
+                            orig_entry = c
+                            break
+                if orig_entry is not None:
+                    # Build enhanced entry from original metadata
+                    enhanced_entry = dict(orig_entry)
+                    enhanced_entry["file"] = os.path.basename(step_path)
+                    enhanced_entry["enhanced"] = True
+                    # Ensure index is set
+                    if "index" not in enhanced_entry:
+                        enhanced_entry["index"] = len(manifest.get("clips", [])) + 1
+                    # Update or append
+                    found = False
+                    for i, c in enumerate(manifest.get("clips", [])):
+                        if c.get("file") == enhanced_entry["file"]:
+                            manifest["clips"][i] = enhanced_entry
+                            found = True
+                            break
+                    if not found:
+                        manifest.setdefault("clips", []).append(enhanced_entry)
+                    write_json(manifest_path, manifest)
+        # Return metadata alongside the filename
+        result_meta = {"filename": os.path.basename(step_path)}
+        if req.name and orig_entry is not None:
+            result_meta.update({
+                "title": orig_entry.get("title", ""),
+                "description": orig_entry.get("description", ""),
+                "hook": req.hook_text or orig_entry.get("hook", ""),
+            })
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Enhance failed: {e}")
+
+    return result_meta
+
+
+# --- Chat-split (two-person interview/podcast) --------------------------------
+
+class ChatSplitDetectRequest(BaseModel):
+    name: str
+    filename: str
+    num_frames: int = 5
+
+
+class ChatSplitRenderRequest(BaseModel):
+    name: str
+    filename: str
+    person1: dict  # {x, y, w, h} normalized
+    person2: dict
+
+
+@app.post("/api/chat-split/detect")
+async def chat_split_detect(req: ChatSplitDetectRequest):
+    """Auto-detect two-person regions in a clip."""
+    video = os.path.join(config.OUTPUT_ROOT, "library", req.name, req.filename)
+    if not os.path.isfile(video):
+        raise HTTPException(status_code=404, detail="Clip not found")
+    from autoclipper.gaming_layout import detect_chat_regions
+    try:
+        p1, p2 = detect_chat_regions(video, req.num_frames)
+        return {"person1": p1, "person2": p2}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/chat-split/render")
+async def chat_split_render(req: ChatSplitRenderRequest):
+    """Render a chat-split video from a library clip."""
+    video = os.path.join(config.OUTPUT_ROOT, "library", req.name, req.filename)
+    if not os.path.isfile(video):
+        raise HTTPException(status_code=404, detail="Clip not found")
+    from autoclipper.gaming_layout import build_chat_split
+    base = os.path.splitext(req.filename)[0]
+    out_name = f"chatsplit_{base}.mp4"
+    out_path = os.path.join(config.OUTPUT_ROOT, "library", req.name, out_name)
+    try:
+        build_chat_split(video, req.person1, req.person2, out_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat-split failed: {e}")
+
+    # Update manifest
+    manifest_path = os.path.join(config.OUTPUT_ROOT, "library", req.name, "manifest.json")
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        manifest.setdefault("clips", []).append({
+            "file": out_name,
+            "index": len(manifest.get("clips", [])) + 1,
+            "title": f"Chat Split - {req.filename}",
+            "chatsplit": True,
+        })
+        from autoclipper.utils import write_json
+        write_json(manifest_path, manifest)
+
+    return {"filename": out_name}
+
+
+PREVIEW_CACHE_DIR = os.path.join(config.OUTPUT_ROOT, "cache", "previews")
+
+
+@app.post("/api/enhance/preview")
+async def enhance_preview(req: EnhanceRequest, current: User = Depends(get_current_user)):
+    """Render a short video preview of the hook overlay (no voice-over).
+
+    Returns an MP4 of the first few seconds with the hook burned on, so the
+    user can see the overlay before committing to a full burn.  Preview files
+    are stored in a dedicated cache directory (not the library folder).
+    """
+    if not req.hook_text.strip():
+        raise HTTPException(status_code=400, detail="hook_text is required for preview")
+
+    if req.name:
+        clip_dir = os.path.join(config.OUTPUT_ROOT, "library", req.name)
+    else:
+        if not req.job_id:
+            raise HTTPException(status_code=400, detail="name or job_id required")
+        clip_dir = os.path.join(config.OUTPUT_ROOT, req.job_id)
+    video = os.path.join(clip_dir, req.filename)
+    if not os.path.isfile(video):
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    from autoclipper import hooks as _hooks
+
+    os.makedirs(PREVIEW_CACHE_DIR, exist_ok=True)
+    base = os.path.splitext(req.filename)[0]
+    import hashlib
+    cache_key = f"{req.hook_text}|{req.hook_position}|{req.hook_size}|{req.hook_style}|{req.hook_hold}"
+    hsh = hashlib.md5(cache_key.encode("utf-8")).hexdigest()[:10]
+    preview_name = f"enhance_prev_{base}_{hsh}.mp4"
+    preview_path = os.path.join(PREVIEW_CACHE_DIR, preview_name)
+    try:
+        font_scale = {"S": 0.8, "M": 1.0, "L": 1.25}.get(req.hook_size, 1.0)
+        duration = req.hook_hold if req.hook_hold and req.hook_hold > 0 else None
+        _hooks.add_hook_to_video(
+            video, req.hook_text, preview_path,
+            position=req.hook_position, font_scale=font_scale,
+            duration=duration, style=req.hook_style,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Preview failed: {e}")
+
+    return {"filename": preview_name}
+
+
+@app.get("/api/cache/{filename}")
+async def serve_cache(filename: str):
+    """Serve a cached preview file."""
+    path = os.path.join(PREVIEW_CACHE_DIR, filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Cache file not found")
+    return FileResponse(path, media_type="video/mp4", filename=filename)
+
+
+class EnhanceDraftRequest(BaseModel):
+    name: str
+    filename: str
+    prompt_hint: str = ""   # optional extra context
+
+
+@app.post("/api/enhance/draft")
+async def enhance_draft(req: EnhanceDraftRequest, current: User = Depends(get_current_user)):
+    """Use Gemini to draft an OpenShorts-style hook from the clip's metadata."""
+    output_dir = os.path.join(config.OUTPUT_ROOT, "library", req.name)
+    manifest_path = os.path.join(output_dir, "manifest.json")
+    hook = ""
+    description = ""
+    title = ""
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+            for c in m.get("clips", []):
+                if c.get("file") == req.filename:
+                    hook = c.get("hook", "")
+                    description = c.get("description", "")
+                    title = c.get("title", "")
+                    break
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    gemini_key = decrypt_value(current.gemini_key) or config.GEMINI_API_KEY
+    if not gemini_key:
+        raise HTTPException(status_code=400, detail="Set a Gemini API key in Settings to draft a hook.")
+    prompt = (
+        "You write viral short-video hooks in the style of OpenShorts: short, punchy, "
+        "curiosity-driving, max 8 words, no hashtags, no quotes. "
+        f"Video title: {title}\nVideo description: {description}\n"
+        f"Existing hook idea: {hook}\nUser note: {req.prompt_hint}\n"
+        "Return ONLY the hook text."
+    )
+    try:
+        from google import genai
+        client = genai.Client(api_key=gemini_key)
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash", contents=prompt
+        )
+        draft = (resp.text or "").strip().strip('"').strip()
+    except Exception as e:  # noqa: BLE001
+        # Fall back to the existing hook if the LLM call fails.
+        if hook:
+            draft = hook
+        else:
+            raise HTTPException(status_code=500, detail=f"Hook draft failed: {e}")
+
+    return {"hook": draft}
+
+
 # --- Saved Library -------------------------------------------------------
 LIBRARY_ROOT = os.path.join(config.OUTPUT_ROOT, "library")
 
@@ -887,6 +1269,67 @@ async def youtube_status(current: User = Depends(get_current_user)):
     }
 
 
+@app.get("/api/youtube/account")
+async def youtube_account(current: User = Depends(get_current_user)):
+    """Return connected YouTube channel info (name, avatar, stats)."""
+    token_json = load_youtube_token(current)
+    if not token_json or not is_user_authenticated(token_json):
+        raise HTTPException(status_code=401, detail="Not authenticated with YouTube")
+    try:
+        from autoclipper.youtube_uploader import creds_from_json, _refresh_if_needed, API_SERVICE_NAME, API_VERSION
+        from googleapiclient.discovery import build as _build
+
+        creds = creds_from_json(token_json)
+        creds, changed = _refresh_if_needed(creds)
+        if changed:
+            from autoclipper.db import save_youtube_token as _save
+            with user_db.Session(user_db.engine) as session:
+                db_user = session.get(User, current.id)
+                if db_user is not None:
+                    _save(db_user, creds.to_json())
+                    session.add(db_user)
+                    session.commit()
+
+        youtube = _build(API_SERVICE_NAME, API_VERSION, credentials=creds)
+        resp = youtube.channels().list(
+            part="snippet,statistics,contentDetails",
+            mine=True,
+        ).execute()
+        items = resp.get("items", [])
+        if not items:
+            raise HTTPException(status_code=404, detail="No YouTube channel found")
+        ch = items[0]
+        snippet = ch.get("snippet", {})
+        stats = ch.get("statistics", {})
+        return {
+            "id": ch.get("id"),
+            "title": snippet.get("title", ""),
+            "description": snippet.get("description", ""),
+            "thumbnail": snippet.get("thumbnails", {}).get("default", {}).get("url", ""),
+            "country": snippet.get("country", ""),
+            "subscriber_count": stats.get("subscriberCount", "0"),
+            "video_count": stats.get("videoCount", "0"),
+            "view_count": stats.get("viewCount", "0"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        ac_logger.error("Failed to fetch YouTube account info: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch YouTube account: {e}")
+
+
+@app.post("/api/youtube/logout")
+async def youtube_logout(current: User = Depends(get_current_user)):
+    """Disconnect YouTube by clearing the stored OAuth token."""
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is not None:
+            db_user.youtube_token = None
+            session.add(db_user)
+            session.commit()
+    return {"ok": True, "authenticated": False}
+
+
 @app.post("/api/youtube/auth_url")
 async def youtube_auth_url(
     req: YouTubeAuthRequest, current: User = Depends(get_current_user)
@@ -1005,6 +1448,146 @@ async def youtube_upload(
     }
 
 
+# ── TikTok endpoints ────────────────────────────────────────────────────────
+
+class TikTokConnectRequest(BaseModel):
+    cookies: str  # Cookie-Editor JSON or Netscape txt
+
+
+class TikTokUploadRequest(BaseModel):
+    job_id: Optional[str] = None
+    name: Optional[str] = None  # library folder
+    filename: str
+    caption: str = ""
+    visibility: str = "PUBLIC_TO_EVERYONE"
+    disable_comment: bool = False
+    disable_duet: bool = False
+    disable_stitch: bool = False
+
+
+@app.get("/api/tiktok/status")
+async def tiktok_status(current: User = Depends(get_current_user)):
+    """Check TikTok connection status."""
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            return {"authenticated": False}
+        cookies = user_db.load_tiktok_cookies(db_user)
+        return {"authenticated": bool(cookies)}
+
+
+@app.post("/api/tiktok/connect")
+async def tiktok_connect(
+    req: TikTokConnectRequest, current: User = Depends(get_current_user)
+):
+    """Import TikTok cookies and fetch account info."""
+    from autoclipper.tiktok_uploader import parse_cookies, validate_tiktok_cookies, fetch_account_info
+
+    try:
+        cookies = parse_cookies(req.cookies)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid cookies: {e}")
+
+    if not validate_tiktok_cookies(cookies):
+        raise HTTPException(
+            status_code=400,
+            detail="No TikTok session cookie found (sessionid). Please export cookies while logged into tiktok.com.",
+        )
+
+    # Store cookies encrypted
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        user_db.save_tiktok_cookies(db_user, req.cookies)
+        session.add(db_user)
+        session.commit()
+
+    # Fetch account info to verify cookies work
+    try:
+        info = await fetch_account_info(req.cookies)
+    except Exception as e:
+        # Cookies stored but can't verify — still success
+        logger.warning("TikTok account info fetch failed: %s", e)
+        info = None
+
+    return {"ok": True, "authenticated": True, "account": info}
+
+
+@app.get("/api/tiktok/account")
+async def tiktok_account(current: User = Depends(get_current_user)):
+    """Fetch connected TikTok account info."""
+    from autoclipper.tiktok_uploader import fetch_account_info
+
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        cookies = user_db.load_tiktok_cookies(db_user)
+        if not cookies:
+            raise HTTPException(status_code=401, detail="TikTok not connected")
+
+    try:
+        info = await fetch_account_info(cookies)
+        return info
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch TikTok account: {e}")
+
+
+@app.post("/api/tiktok/upload")
+async def tiktok_upload(
+    req: TikTokUploadRequest, current: User = Depends(get_current_user)
+):
+    """Upload a video to TikTok."""
+    from autoclipper.tiktok_uploader import upload_video
+
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        cookies = user_db.load_tiktok_cookies(db_user)
+        if not cookies:
+            raise HTTPException(status_code=401, detail="TikTok not connected. Please connect first.")
+
+    # Resolve video file
+    if req.name:
+        video_path = os.path.join(config.OUTPUT_ROOT, "library", req.name, req.filename)
+    elif req.job_id:
+        video_path = os.path.join(config.OUTPUT_ROOT, req.job_id, req.filename)
+    else:
+        raise HTTPException(status_code=400, detail="Either name or job_id is required")
+
+    if not os.path.isfile(video_path):
+        raise HTTPException(status_code=404, detail=f"Video file not found: {req.filename}")
+
+    try:
+        result = await upload_video(
+            video_path=video_path,
+            caption=req.caption,
+            cookies_json=cookies,
+            visibility=req.visibility,
+            disable_comment=req.disable_comment,
+            disable_duet=req.disable_duet,
+            disable_stitch=req.disable_stitch,
+        )
+        return result
+    except Exception as e:
+        logger.error("TikTok upload error: %s", e)
+        raise HTTPException(status_code=500, detail=f"TikTok upload failed: {e}")
+
+
+@app.post("/api/tiktok/logout")
+async def tiktok_logout(current: User = Depends(get_current_user)):
+    """Disconnect TikTok by clearing stored cookies."""
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is not None:
+            db_user.tiktok_cookies = None
+            session.add(db_user)
+            session.commit()
+    return {"ok": True, "authenticated": False}
+
+
 class SaveLibraryRequest(BaseModel):
     job_id: str
     filename: str
@@ -1060,9 +1643,11 @@ async def save_to_library_endpoint(req: SaveLibraryRequest):
     manifest.setdefault("title", req.title or safe_title)
     manifest.setdefault("job_id", req.job_id)
     clips = manifest.get("clips", [])
+    dest_name = f"clip{idx}.mp4"
     clips.append(
         {
             "index": idx,
+            "file": dest_name,
             "title": req.clip_title or req.filename,
             "description": req.description or "",
             "hook": req.hook or "",
@@ -1099,7 +1684,8 @@ async def register_burn(req: RegisterBurnRequest):
         except (OSError, json.JSONDecodeError):
             manifest = {}
 
-    src_idx = int("".join(filter(str.isdigit, req.source_file)) or "0")
+    base = os.path.splitext(req.source_file)[0]
+    src_idx = int("".join(filter(str.isdigit, base)) or "0")
     for c in manifest.get("clips", []):
         if c.get("index") == src_idx:
             c["subtitled"] = req.result_file
@@ -1123,7 +1709,8 @@ def _clip_field(manifest: dict, filename: str, key: str, position: int = 0) -> s
         if c.get("file") == filename:
             return c.get(key, "")
     # Fallback: match by extracted index (for older manifests).
-    idx = int("".join(filter(str.isdigit, filename)) or "0")
+    base = os.path.splitext(filename)[0]
+    idx = int("".join(filter(str.isdigit, base)) or "0")
     for c in manifest.get("clips", []):
         if c.get("index") == idx:
             return c.get(key, "")

@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Download, Type, FileText, Bookmark, Sparkles, Youtube } from 'lucide-react'
+import { Download, Type, FileText, Bookmark, Sparkles, Youtube, Users } from 'lucide-react'
 import { fileUrl, saveToLibrary, applyHook, hookPreview, API_URL } from '../api.js'
 import SubtitleEditor from './SubtitleEditor.jsx'
 import YouTubeUploadModal from './YouTubeUploadModal.jsx'
+import TikTokUploadModal from './TikTokUploadModal.jsx'
+import ChatSplitModal from './ChatSplitModal.jsx'
 
 export default function ClipGrid({ jobId, clips, onApply }) {
   return (
@@ -26,6 +28,9 @@ function ClipCard({ jobId, clip, onApply }) {
   const [savedMsg, setSavedMsg] = useState('')
   const [hooking, setHooking] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [tiktokUploading, setTiktokUploading] = useState(false)
+  const [splitting, setSplitting] = useState(false)
+  const [splitInfo, setSplitInfo] = useState(null) // { name, clip } after auto-save
   const url = fileUrl(jobId, clip.file)
 
   async function handleSave() {
@@ -45,6 +50,25 @@ function ClipCard({ jobId, clip, onApply }) {
     } finally {
       setSaving(false)
       setTimeout(() => setSavedMsg(''), 4000)
+    }
+  }
+
+  async function handleSplit() {
+    setSplitting(true)
+    try {
+      const res = await saveToLibrary({
+        jobId,
+        filename: clip.file,
+        clipTitle: clip.title,
+        description: clip.description,
+        hook: clip.hook,
+      })
+      setSplitInfo({ name: res.folder, clip: { file: res.file, title: clip.title } })
+    } catch (e) {
+      setSavedMsg(e.message)
+      setTimeout(() => setSavedMsg(''), 4000)
+    } finally {
+      setSplitting(false)
     }
   }
 
@@ -128,6 +152,24 @@ function ClipCard({ jobId, clip, onApply }) {
           >
             <Youtube size={13} /> YouTube
           </button>
+          <button
+            onClick={() => setTiktokUploading(true)}
+            className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-[#fe2c55]/15 text-[#fe2c55]
+                       hover:bg-[#fe2c55]/25 transition-colors flex items-center justify-center gap-1"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1v-3.51a6.37 6.37 0 0 0-.79-.05A6.34 6.34 0 0 0 3.16 15.2a6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V8.73a8.19 8.19 0 0 0 4.78 1.53V6.81a4.84 4.84 0 0 1-1.03-.12z"/>
+            </svg>
+            TikTok
+          </button>
+          <button
+            onClick={handleSplit}
+            disabled={splitting}
+            className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-cyan-500/15 text-cyan-300
+                       hover:bg-cyan-500/25 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+          >
+            <Users size={13} /> {splitting ? 'Saving…' : 'Split'}
+          </button>
         </div>
         <a
           href={url}
@@ -168,6 +210,28 @@ function ClipCard({ jobId, clip, onApply }) {
           }}
           onClose={() => setUploading(false)}
           onDone={() => setUploading(false)}
+        />
+      )}
+
+      {tiktokUploading && (
+        <TikTokUploadModal
+          source={{
+            jobId,
+            filename: clip.file,
+            title: clip.title,
+            description: clip.description,
+          }}
+          onClose={() => setTiktokUploading(false)}
+          onDone={() => setTiktokUploading(false)}
+        />
+      )}
+
+      {splitInfo && (
+        <ChatSplitModal
+          name={splitInfo.name}
+          clip={splitInfo.clip}
+          onClose={() => { setSplitInfo(null); setSplitting(false) }}
+          onDone={() => { setSplitInfo(null); setSplitting(false) }}
         />
       )}
     </div>

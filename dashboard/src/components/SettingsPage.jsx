@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { KeyRound, Cpu, ToggleLeft, Save, Check, Trash2 } from 'lucide-react'
 import SettingsPanel from './SettingsPanel.jsx'
 import YouTubeSettings from './YouTubeSettings.jsx'
+import TikTokSettings from './TikTokSettings.jsx'
 import { runCleanup, saveSettings } from '../api.js'
 
 export default function SettingsPage({ settings, setSettings }) {
@@ -95,6 +96,8 @@ export default function SettingsPage({ settings, setSettings }) {
         </section>
 
         <YouTubeSettings />
+
+        <TikTokSettings />
 
         <section className="border-t border-border pt-5">
           <div className="flex items-center gap-2 mb-3">

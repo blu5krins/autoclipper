@@ -6,6 +6,8 @@ services:
       - "8000:8000"
     volumes:
       - ./output:/app/output
+      - ./app.py:/app/app.py
+      - ./autoclipper:/app/autoclipper
       - yt_config:/app/yt_config
       - autoclipper_data:/app/data
       - kokoro_cache:/app/models/kokoro

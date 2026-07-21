@@ -63,6 +63,7 @@ def run(
     vertical: bool = True,
     use_yolo: bool = True,
     subtitles: bool = True,
+    split_screen: bool = False,
     force_hd: bool = False,
     cookies_text: str = None,
     clip_count: int = None,
@@ -113,9 +114,30 @@ def run(
     # 4. Cut clips (FFmpeg)
     clips = cut_all(video_path, clip_candidates, output_dir, base_name)
 
-    # 5. Reframe to vertical 9:16 with face/subject tracking
+    # 4b. Chat-split: convert horizontal clips to 9:16 split-screen (two people)
+    if split_screen:
+        from .gaming_layout import auto_chat_split_clip as _auto_split
+        for clip in clips:
+            src = os.path.join(output_dir, clip["file"])
+            if not os.path.exists(src):
+                continue
+            s_name = clip["file"].rsplit(".", 1)[0] + "_split.mp4"
+            s_path = os.path.join(output_dir, s_name)
+            try:
+                _auto_split(src, s_path)
+                os.remove(src)
+                clip["file"] = s_name
+                clip["split_screen"] = True
+                logger.info("Chat-split applied to %s -> %s", src, s_name)
+            except Exception as e:
+                logger.warning("Chat-split skipped for %s: %s", src, e)
+
+    # 5. Reframe to vertical 9:16 with face/subject tracking.
+    #    Skip reframing for clips that already have split-screen applied.
     if vertical:
         for clip in clips:
+            if clip.get("split_screen"):
+                continue
             src = os.path.join(output_dir, clip["file"])
             if not os.path.exists(src):
                 continue

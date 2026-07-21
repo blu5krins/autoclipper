@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { LayoutDashboard, FolderOpen, Scissors, Settings as SettingsIcon, Flame, LogOut, AudioLines } from 'lucide-react'
+import { LayoutDashboard, FolderOpen, Scissors, Settings as SettingsIcon, Flame, LogOut } from 'lucide-react'
 import { submitJob, getStatus, isLoggedIn, setToken, fetchSettings } from './api.js'
 import SubmitForm from './components/SubmitForm.jsx'
 import LogConsole from './components/LogConsole.jsx'
@@ -7,7 +7,6 @@ import ClipGrid from './components/ClipGrid.jsx'
 import Library from './components/Library.jsx'
 import SettingsPage from './components/SettingsPage.jsx'
 import TrendingPage from './components/TrendingPage.jsx'
-import VoiceOverPage from './components/VoiceOverPage.jsx'
 import AuthPage from './components/AuthPage.jsx'
 
 const DEFAULT_SETTINGS = {
@@ -38,7 +37,6 @@ export default function App() {
   const [authed, setAuthed] = useState(isLoggedIn())
   const [tab, setTab] = useState('generator')
   const [settings, setSettings] = useState(loadSettings)
-  const [voiceoverTarget, setVoiceoverTarget] = useState(null)
   const [job, setJob] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -117,6 +115,7 @@ export default function App() {
     if (payload.minClip) opts.min_clip = payload.minClip
     if (payload.maxClip) opts.max_clip = payload.maxClip
     if (payload.contentType) opts.content_type = payload.contentType
+    if (payload.splitScreen) opts.split_screen = true
 
     const file = payload.file || null
     const body = file ? opts : { ...opts, source: payload.source }
@@ -189,14 +188,6 @@ export default function App() {
           >
             Trending Ideas
           </SidebarButton>
-
-          <SidebarButton
-            active={tab === 'voiceover'}
-            onClick={() => { setVoiceoverTarget(null); setTab('voiceover') }}
-            icon={AudioLines}
-          >
-            Voice-Over
-          </SidebarButton>
         </nav>
 
         <div className="px-4 pb-4">
@@ -259,11 +250,9 @@ export default function App() {
               )}
             </>
            ) : tab === 'library' ? (
-            <Library onVoiceOver={(t) => { setVoiceoverTarget(t); setTab('voiceover') }} />
+            <Library />
           ) : tab === 'trending' ? (
             <TrendingPage settings={settings} />
-          ) : tab === 'voiceover' ? (
-            <VoiceOverPage initialTarget={voiceoverTarget} />
           ) : (
             <SettingsPage settings={settings} setSettings={setSettings} />
           )}

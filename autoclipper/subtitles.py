@@ -11,33 +11,50 @@ from . import config
 from .utils import logger, run_command
 
 
-def _words_in_range(words, start, end):
-    for w in words or []:
-        ws, we = w.get("start"), w.get("end")
-        if ws is None or we is None:
-            continue
-        if ws >= start and we <= end + 0.5:
-            yield w
-
-
-def build_srt(words, start, end, words_per_cue=None):
-    """Return an SRT string for words within [start, end], times relative to start."""
-    words_per_cue = words_per_cue or config.SUBTITLE_WORDS_PER_CUE
+def build_srt(words, start, end, max_chars=20, max_duration=2.0):
+    """Return an SRT string for words within [start, end], times relative to start.
+    
+    Groups words by max_chars (character count) or max_duration (seconds from block
+    start) — whichever is hit first — matching OpenShorts' generate_srt() algorithm.
+    """
     selected = [
         {"word": w.get("word", "").strip(), "start": w["start"], "end": w["end"]}
-        for w in _words_in_range(words, start, end)
-        if w.get("word", "").strip()
+        for w in (words or [])
+        if w.get("word", "").strip() and w.get("start") is not None and w.get("end") is not None
+           and w["end"] > start and w["start"] < end
     ]
     if not selected:
         return ""
 
     cues = []
-    for i in range(0, len(selected), max(1, words_per_cue)):
-        group = selected[i : i + words_per_cue]
-        text = " ".join(g["word"] for g in group)
-        cue_start = group[0]["start"] - start
-        cue_end = group[-1]["end"] - start
-        cues.append((cue_start, cue_end, text))
+    block = []
+    block_start = None
+
+    for w in selected:
+        s = max(0, w["start"] - start)
+        e = max(0, w["end"] - start)
+        w["start_rel"] = s
+        w["end_rel"] = e
+
+        if not block:
+            block = [w]
+            block_start = s
+        else:
+            current_text_len = sum(len(b["word"]) + 1 for b in block)
+            duration = e - block_start
+            if current_text_len + len(w["word"]) > max_chars or duration > max_duration:
+                block_end = block[-1]["end_rel"]
+                text = " ".join(b["word"] for b in block)
+                cues.append((block_start, block_end, text))
+                block = [w]
+                block_start = s
+            else:
+                block.append(w)
+
+    if block:
+        block_end = block[-1]["end_rel"]
+        text = " ".join(b["word"] for b in block)
+        cues.append((block_start, block_end, text))
 
     def _fmt(t):
         ms = int(round((t - int(t)) * 1000))
@@ -85,8 +102,8 @@ def burn_subtitles(video_path: str, srt_path: str, out_path: str) -> str:
         [
             "ffmpeg", "-y", "-i", os.path.basename(video_path),
             "-vf", vf,
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-            "-x264-params", "ref=4:me=hex:subme=7:trellis=1", "-pix_fmt", "yuv420p",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-pix_fmt", "yuv420p",
             "-c:a", "copy", "-movflags", "+faststart",
             os.path.basename(out_path),
         ],
@@ -178,30 +195,34 @@ def build_ass(cues: list, style: dict) -> str:
     """Build an ASS subtitle string from edited cues + styling options.
 
     `cues` is a list of {"start", "end", "text"} (seconds, relative to clip).
-    `style` keys: font, font_size, text_color, outline_color, box_color,
-    box_opacity (0-100), highlight_color, highlight (bool), box (bool), margin_v,
-    position ("top" | "middle" | "bottom").
+    `style` keys: font, font_size, text_color, outline_color, border_width,
+    box_color, box_opacity (0-100), highlight_color, highlight (bool), box (bool),
+    margin_v, position ("top" | "middle" | "bottom"), animation ("pop"|"glow"|"karaoke"|"none").
     When highlight is on, each cue uses karaoke timing so the spoken word fills
     with `highlight_color` (the classic short-form caption effect).
+    Maps to OpenShorts animation styles: karaoke/glow → highlight, none → no highlight, pop → highlight.
     """
     font = _map_font(style.get("font", config.SUBTITLE_FONT))
     size = int(style.get("font_size", config.SUBTITLE_FONT_SIZE))
+    # OpenShorts font size scaling factor: 0.85
+    size = max(10, int(size * 0.85))
     primary = hex_to_ass(style.get("text_color", "#FFFFFF"))
     outline = hex_to_ass(style.get("outline_color", "#000000"))
     highlight = hex_to_ass(style.get("highlight_color", "#FFFF00"))
     margin_v = int(style.get("margin_v", config.SUBTITLE_MARGIN_V))
     position = (style.get("position", "bottom") or "bottom").lower()
     use_box = bool(style.get("box", False))
-    use_highlight = bool(style.get("highlight", False))
+    animation = (style.get("animation", "karaoke") or "karaoke").lower()
+    use_highlight = bool(style.get("highlight", animation in ("karaoke", "glow", "pop")))
 
     box_opacity = int(style.get("box_opacity", 50))
     alpha = max(0, min(255, int(round(box_opacity / 100 * 255))))
     box_color = hex_to_ass(style.get("box_color", "#000000"))
     back = f"&H{alpha:02X}{box_color[2:8]}"  # &H<AABBGGRR>
 
-    # Match OpenShorts TikTok style: BorderStyle 1, thick 4px outline, no shadow.
-    border_style = 3 if use_box else 1  # 3 = opaque box behind text
-    outline_width = 4 if not use_box else 1
+    # OpenShorts-style: BorderStyle 3 for box, BorderStyle 1 for outline with variable width
+    border_style = 3 if use_box else 1
+    outline_width = int(style.get("border_width", 2)) if not use_box else 1
     shadow = 0
     # Alignment: 1=top-left, 2=bottom-center, 5=middle-center, etc. We use the
     # center variants: top=6, middle=10, bottom=2 (horizontal center).
@@ -259,8 +280,8 @@ def burn_ass(video_path: str, ass_path: str, out_path: str) -> str:
         [
             "ffmpeg", "-y", "-i", os.path.basename(video_path),
             "-vf", vf,
-            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-            "-x264-params", "ref=4:me=hex:subme=7:trellis=1", "-pix_fmt", "yuv420p",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-pix_fmt", "yuv420p",
             "-c:a", "copy", "-movflags", "+faststart",
             os.path.basename(out_path),
         ],

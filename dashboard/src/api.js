@@ -247,6 +247,10 @@ export function libraryFileUrl(name, filename) {
   return `${API_URL}/api/library/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`
 }
 
+export function cacheFileUrl(filename) {
+  return `${API_URL}/api/cache/${encodeURIComponent(filename)}`
+}
+
 export function librarySrtUrl(name, filename) {
   const base = filename.replace(/\.mp4$/i, '')
   return `${API_URL}/api/library/${encodeURIComponent(name)}/${encodeURIComponent(base)}.srt`
@@ -305,11 +309,14 @@ export async function getSrt(jobId, filename) {
   return res.text()
 }
 
-export async function applySubtitles(jobId, filename, cues, style) {
+export async function applySubtitles({ jobId, filename, cues, style, name }) {
+  const payload = { filename, cues, style }
+  if (name) payload.name = name
+  else payload.job_id = jobId
   const res = await fetch(`${API_URL}/api/subtitle`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ job_id: jobId, filename, cues, style }),
+    body: JSON.stringify(payload),
   })
   if (!res.ok) {
     let detail = ''
@@ -374,6 +381,16 @@ export async function youtubeStatus() {
   return res.json()
 }
 
+export async function youtubeAccount() {
+  const res = await authFetch(`${API_URL}/api/youtube/account`)
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`YouTube account failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
 export async function youtubeAuthUrl(redirectUri) {
   const res = await authFetch(`${API_URL}/api/youtube/auth_url`, {
     method: 'POST',
@@ -400,6 +417,16 @@ export async function youtubeCallback(code, redirectUri) {
   return res.json()
 }
 
+export async function youtubeLogout() {
+  const res = await authFetch(`${API_URL}/api/youtube/logout`, { method: 'POST' })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`YouTube logout failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
 export async function youtubeUpload(payload) {
   const res = await authFetch(`${API_URL}/api/youtube/upload`, {
     method: 'POST',
@@ -410,6 +437,66 @@ export async function youtubeUpload(payload) {
     let detail = ''
     try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
     throw new Error(`YouTube upload failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+// ── TikTok ─────────────────────────────────────────────────────────────────
+
+export async function tiktokStatus() {
+  const res = await authFetch(`${API_URL}/api/tiktok/status`)
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`TikTok status failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+export async function tiktokConnect(cookies) {
+  const res = await authFetch(`${API_URL}/api/tiktok/connect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cookies }),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`TikTok connect failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+export async function tiktokAccount() {
+  const res = await authFetch(`${API_URL}/api/tiktok/account`)
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`TikTok account failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+export async function tiktokUpload(payload) {
+  const res = await authFetch(`${API_URL}/api/tiktok/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`TikTok upload failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+export async function tiktokLogout() {
+  const res = await authFetch(`${API_URL}/api/tiktok/logout`, { method: 'POST' })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`TikTok logout failed (${res.status}) ${detail}`)
   }
   return res.json()
 }
@@ -428,9 +515,53 @@ export async function applyVoiceOver(payload) {
   return res.json()
 }
 
+export async function enhanceClip(payload) {
+  const res = await authFetch(`${API_URL}/api/enhance`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(detail || `Enhance failed (${res.status})`)
+  }
+  return res.json()
+}
+
+export async function enhanceDraft(payload) {
+  const res = await authFetch(`${API_URL}/api/enhance/draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(detail || `Draft failed (${res.status})`)
+  }
+  return res.json()
+}
+
+export async function enhancePreview(payload) {
+  const res = await authFetch(`${API_URL}/api/enhance/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(detail || `Preview failed (${res.status})`)
+  }
+  return res.json()
+}
+
 export async function previewVoiceOver(payload) {
   const res = await authFetch(`${API_URL}/api/voiceover/preview`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   })
   if (!res.ok) {
     let detail = ''
@@ -444,6 +575,24 @@ export async function previewVoiceOver(payload) {
 export function voiceOverFileUrl(jobId, name, filename) {
   if (name) return `${API_URL}/api/library/${encodeURIComponent(name)}/${encodeURIComponent(filename)}`
   return fileUrl(jobId, filename)
+}
+
+export async function chatSplitDetect(name, filename, numFrames = 5) {
+  const res = await authFetch(`${API_URL}/api/chat-split/detect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, filename, num_frames: numFrames }),
+  })
+  return res.json()
+}
+
+export async function chatSplitRender(name, filename, person1, person2) {
+  const res = await authFetch(`${API_URL}/api/chat-split/render`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, filename, person1, person2 }),
+  })
+  return res.json()
 }
 
 export async function runCleanup(hours) {

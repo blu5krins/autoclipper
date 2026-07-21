@@ -17,6 +17,7 @@ export default function SubmitForm({ onSubmit, busy, settings }) {
   const [contentType, setContentType] = useState('general')
   const [showGaming, setShowGaming] = useState(false)
   const [gamingReady, setGamingReady] = useState(null) // { source, layout }
+  const [splitScreen, setSplitScreen] = useState(false)
   const fileInput = useRef(null)
 
   const CONTENT_TYPES = [
@@ -104,6 +105,7 @@ export default function SubmitForm({ onSubmit, busy, settings }) {
       clipCount: clipCount || undefined,
       minClip: minClip || undefined,
       maxClip: maxClip || undefined,
+      splitScreen: splitScreen || undefined,
     }
     // Gaming: use the prepared 9:16 source instead of the raw file.
     if (contentType === 'gaming' && gamingReady) {
@@ -279,6 +281,21 @@ export default function SubmitForm({ onSubmit, busy, settings }) {
                     : 'Upload or paste a URL first'}
                 </button>
               )}
+            </div>
+          )}
+
+          {contentType === 'podcast' && (
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                id="splitScreen"
+                type="checkbox"
+                checked={splitScreen}
+                onChange={(e) => setSplitScreen(e.target.checked)}
+                className="accent-cyan-400"
+              />
+              <label htmlFor="splitScreen" className="text-xs text-zinc-300 cursor-pointer select-none">
+                Split Screen <span className="text-zinc-500">(2 orang, atas/bawah)</span>
+              </label>
             </div>
           )}
         </div>

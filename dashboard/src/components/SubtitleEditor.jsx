@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { X, Type, Loader2 } from 'lucide-react'
-import { getSrt, parseSrt, applySubtitles, fileUrl } from '../api.js'
+import { getSrt, parseSrt, applySubtitles, fileUrl, libraryFileUrl } from '../api.js'
 
 const FONT_OPTIONS = [
   { value: 'Verdana', label: 'Verdana' },
@@ -28,11 +28,19 @@ const HIGHLIGHT_COLORS = [
   { color: '#FF69B4', label: 'Pink' },
 ]
 
+const ANIMATION_OPTIONS = [
+  { value: 'pop', label: 'Pop' },
+  { value: 'glow', label: 'Glow' },
+  { value: 'karaoke', label: 'Karaoke' },
+  { value: 'none', label: 'None' },
+]
+
 const DEFAULT_STYLE = {
   font: 'Arial',
   font_size: 80,
   text_color: '#FFFFFF',
   outline_color: '#000000',
+  border_width: 2,
   box_color: '#000000',
   box_opacity: 50,
   highlight_color: '#FFDD00',
@@ -40,9 +48,10 @@ const DEFAULT_STYLE = {
   box: false,
   position: 'bottom',
   margin_v: 120,
+  animation: 'karaoke',
 }
 
-export default function SubtitleEditor({ jobId, clip, onApply, onClose, srtUrl }) {
+export default function SubtitleEditor({ jobId, clip, onApply, onClose, srtUrl, name }) {
   const [cues, setCues] = useState([])
   const [style, setStyle] = useState(DEFAULT_STYLE)
   const [busy, setBusy] = useState(false)
@@ -73,43 +82,62 @@ export default function SubtitleEditor({ jobId, clip, onApply, onClose, srtUrl }
 
   // Whole-transcript editing: joined text <-> per-cue cues. OpenShorts style.
   const [fullText, setFullText] = useState('')
+  const [originalText, setOriginalText] = useState('')
   useEffect(() => {
-    if (loaded) setFullText(cues.map((c) => c.text).join(' '))
+    if (loaded) {
+      const joined = cues.map((c) => c.text).join(' ')
+      setOriginalText(joined)
+      setFullText(joined)
+    }
   }, [loaded]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Live "what the burn will look like" — rebuild cues from the edited text so
-  // the preview updates as the user types (not just on Generate).
-  const editedCues = useMemo(() => buildCuesFromText(fullText), [fullText]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Use original Whisper timestamps when text is unchanged; rebuild only when edited.
+  const editedCues = useMemo(() => {
+    if (fullText === originalText && cues.length > 0) return cues
+    return buildCuesFromText(fullText)
+  }, [fullText, originalText, cues]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function buildCuesFromText(text) {
-    const words = text.split(/\s+/).filter(Boolean)
-    if (words.length === 0) return []
-    if (cues.length === 0) return words.map((w) => ({ start: 0, end: 1, text: w }))
-    // Redistribute words across the original cue time ranges.
-    const totalWords = cues.reduce((n, c) => n + (c.text ? c.text.split(/\s+/).filter(Boolean).length : 0), 0) || 1
-    const out = []
-    let wi = 0
-    for (const cue of cues) {
-      const n = Math.max(1, Math.round(((cue.text ? cue.text.split(/\s+/).filter(Boolean).length : 1) / totalWords) * words.length))
-      const slice = words.slice(wi, wi + n)
-      wi += slice.length
-      if (slice.length === 0) continue
-      out.push({ start: cue.start, end: cue.end, text: slice.join(' ') })
+    const newWords = text.split(/\s+/).filter(Boolean)
+    if (newWords.length === 0) return []
+    if (cues.length === 0) return newWords.map((w) => ({ start: 0, end: 1, text: w }))
+    // Group words into phrases like the backend build_srt (max 20 chars)
+    const MAX_CHARS = 20
+    const totalDuration = cues[cues.length - 1].end - cues[0].start
+    const startMs = cues[0].start
+    const phrases = []
+    let phraseWords = []
+    let phraseLen = 0
+    for (const w of newWords) {
+      const needed = phraseLen === 0 ? w.length : phraseLen + 1 + w.length
+      if (phraseWords.length > 0 && needed > MAX_CHARS) {
+        phrases.push(phraseWords.join(' '))
+        phraseWords = []
+        phraseLen = 0
+      }
+      phraseWords.push(w)
+      phraseLen = phraseLen === 0 ? w.length : phraseLen + 1 + w.length
     }
-    // Append any leftovers to the last cue.
-    if (wi < words.length && out.length > 0) {
-      out[out.length - 1].text += ' ' + words.slice(wi).join(' ')
-    }
-    return out.length ? out : words.map((w) => ({ start: 0, end: 1, text: w }))
+    if (phraseWords.length > 0) phrases.push(phraseWords.join(' '))
+    // Distribute phrases evenly across total duration (one word per unit of time)
+    const wordDuration = totalDuration / newWords.length
+    let t = startMs
+    return phrases.map((phrase) => {
+      const count = phrase.split(/\s+/).length
+      const s = t
+      const e = t + count * wordDuration
+      t = e
+      return { text: phrase, start: s, end: e }
+    })
   }
 
   async function handleGenerate() {
-    if (!clip.srt) return
+    if (!clip.srt && !name) return
     const editedCues = buildCuesFromText(fullText)
     setBusy(true)
     setError('')
     try {
-      const res = await applySubtitles(jobId, clip.file, editedCues, style)
+      const res = await applySubtitles({ jobId, filename: clip.file, cues: editedCues, style, name })
       onApply(clip.index, res.filename)
       onClose()
     } catch (e) {
@@ -133,7 +161,7 @@ export default function SubtitleEditor({ jobId, clip, onApply, onClose, srtUrl }
         <div className="flex-1 flex flex-col items-center justify-center bg-black rounded-l-2xl border-r border-white/5 overflow-hidden relative aspect-[9/16] max-h-[600px]">
           <div className="relative w-full h-full">
             <video
-              src={fileUrl(jobId, clip.file)}
+              src={name ? libraryFileUrl(name, clip.file) : fileUrl(jobId, clip.file)}
               controls
               playsInline
               onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
@@ -145,18 +173,19 @@ export default function SubtitleEditor({ jobId, clip, onApply, onClose, srtUrl }
               viewBox="0 0 1080 1920"
               preserveAspectRatio="xMidYMid meet"
             >
-               {(() => {
-                 const active = (editedCues.length ? editedCues : cues).find(
-                   (c) => currentTime >= c.start && currentTime <= c.end
-                 )
-                if (!active) return null
-                const outline = style.box ? 1 : 4
-                const words = active.text.split(/\s+/).filter(Boolean)
-                const span = Math.max(0.001, active.end - active.start)
-                const progress = Math.min(1, Math.max(0, (currentTime - active.start) / span))
-                const doneCount = style.highlight
-                  ? Math.floor(progress * words.length + 0.0001)
-                  : words.length
+                {(() => {
+                  const active = (editedCues.length ? editedCues : cues).find(
+                    (c) => currentTime >= c.start && currentTime <= c.end
+                  )
+                 if (!active) return null
+                 const useHighlight = (style.animation || 'karaoke') !== 'none'
+                 const outline = style.box ? 1 : Math.max(1, style.border_width || 2)
+                 const words = active.text.split(/\s+/).filter(Boolean)
+                 const span = Math.max(0.001, active.end - active.start)
+                 const progress = Math.min(1, Math.max(0, (currentTime - active.start) / span))
+                 const doneCount = useHighlight
+                   ? Math.floor(progress * words.length + 0.0001)
+                   : words.length
                 const pos = (style.position || 'bottom').toLowerCase()
                 const baseline =
                   pos === 'top' ? 'hanging' : pos === 'middle' ? 'middle' : 'alphabetic'
@@ -177,27 +206,27 @@ export default function SubtitleEditor({ jobId, clip, onApply, onClose, srtUrl }
                     textAnchor="middle"
                     dominantBaseline={baseline}
                   >
-                    {style.box && (
-                      <text
-                        x="540"
-                        y={y}
-                        fill={style.box_color}
-                        fillOpacity={style.box_opacity / 100}
-                        stroke="none"
-                        style={{ paintOrder: 'stroke', stroke: style.box_color, strokeWidth: outline * 2 + fontSize * 0.25 }}
-                      >
-                        {active.text}
-                      </text>
-                    )}
-                    <text
-                      x="540"
-                      y={y}
-                      fill={style.text_color}
-                      stroke={style.outline_color}
-                      strokeWidth={outline * 2}
-                      strokeLinejoin="round"
-                      paintOrder="stroke"
-                    >
+                     {style.box && (
+                       <text
+                         x="540"
+                         y={y}
+                         fill={style.box_color}
+                         fillOpacity={style.box_opacity / 100}
+                         stroke="none"
+                         style={{ paintOrder: 'stroke', stroke: style.box_color, strokeWidth: outline * 2 + fontSize * 0.3 }}
+                       >
+                         {active.text}
+                       </text>
+                     )}
+                     <text
+                       x="540"
+                       y={y}
+                       fill={style.text_color}
+                       stroke={style.outline_color}
+                       strokeWidth={outline * 3}
+                       strokeLinejoin="round"
+                       paintOrder="stroke"
+                     >
                       {words.map((w, i) => (
                         <tspan key={i} fill={i < doneCount ? style.highlight_color : style.text_color} stroke="none">
                           {w}
@@ -297,6 +326,24 @@ export default function SubtitleEditor({ jobId, clip, onApply, onClose, srtUrl }
               </div>
             </div>
 
+            {/* Animation Style (OpenShorts-style) */}
+            <div>
+              <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
+                Animation
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {ANIMATION_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setStyleKey('animation', opt.value)}
+                    className={`p-2 rounded-lg border text-center text-xs font-medium transition-all ${style.animation === opt.value ? 'bg-primary/20 border-primary text-white' : 'bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10'}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Text color */}
             <div>
               <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
@@ -344,28 +391,39 @@ export default function SubtitleEditor({ jobId, clip, onApply, onClose, srtUrl }
                   />
                 ))}
               </div>
-              <label className="flex items-center gap-2 mt-2 text-xs text-zinc-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={style.highlight}
-                  onChange={(e) => setStyleKey('highlight', e.target.checked)}
-                  className="accent-primary w-4 h-4"
-                />
-                Word highlight
-              </label>
             </div>
 
-            {/* Box background */}
+            {/* Border / Outline (OpenShorts-style: color + width slider) */}
+            <div>
+              <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">Border</label>
+              <div className="flex items-center gap-3">
+                <label className="relative w-8 h-8 rounded-lg border border-white/10 cursor-pointer overflow-hidden shrink-0" title="Border color">
+                  <div className="w-full h-full" style={{ backgroundColor: style.outline_color }} />
+                  <input type="color" value={style.outline_color} onChange={(e) => setStyleKey('outline_color', e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                </label>
+                <div className="flex-1">
+                  <input
+                    type="range"
+                    min="0"
+                    max="5"
+                    value={style.border_width}
+                    onChange={(e) => setStyleKey('border_width', parseInt(e.target.value))}
+                    className="w-full accent-primary"
+                  />
+                  <div className="flex justify-between text-[10px] text-zinc-500">
+                    <span>None</span>
+                    <span>Thick</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Background Box */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Box</label>
+                <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Background Box</label>
                 <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={style.box}
-                    onChange={(e) => setStyleKey('box', e.target.checked)}
-                    className="sr-only peer"
-                  />
+                  <input type="checkbox" checked={style.box} onChange={(e) => setStyleKey('box', e.target.checked)} className="sr-only peer" />
                   <div className="w-8 h-4 bg-zinc-700 rounded-full peer-checked:bg-primary after:content-[''] after:absolute after:top-0 after:left-0 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></div>
                 </label>
               </div>
@@ -374,22 +432,10 @@ export default function SubtitleEditor({ jobId, clip, onApply, onClose, srtUrl }
                   <div className="flex items-center gap-3">
                     <label className="relative w-8 h-8 rounded-lg border border-white/10 cursor-pointer overflow-hidden shrink-0">
                       <div className="w-full h-full" style={{ backgroundColor: style.box_color }} />
-                      <input
-                        type="color"
-                        value={style.box_color}
-                        onChange={(e) => setStyleKey('box_color', e.target.value)}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
-                      />
+                      <input type="color" value={style.box_color} onChange={(e) => setStyleKey('box_color', e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
                     </label>
                     <div className="flex-1">
-                      <input
-                        type="range"
-                        min="10"
-                        max="100"
-                        value={style.box_opacity}
-                        onChange={(e) => setStyleKey('box_opacity', Number(e.target.value))}
-                        className="w-full accent-primary"
-                      />
+                      <input type="range" min="10" max="100" value={style.box_opacity} onChange={(e) => setStyleKey('box_opacity', Number(e.target.value))} className="w-full accent-primary" />
                       <div className="flex justify-between text-[10px] text-zinc-500">
                         <span>Transparent</span>
                         <span>{style.box_opacity}%</span>
@@ -398,22 +444,6 @@ export default function SubtitleEditor({ jobId, clip, onApply, onClose, srtUrl }
                   </div>
                 </div>
               )}
-            </div>
-
-            {/* Outline / border color */}
-            <div>
-              <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2 block">
-                Outline Color
-              </label>
-              <label className="relative w-8 h-8 rounded-lg border border-white/10 cursor-pointer overflow-hidden inline-block">
-                <div className="w-full h-full" style={{ backgroundColor: style.outline_color }} />
-                <input
-                  type="color"
-                  value={style.outline_color}
-                  onChange={(e) => setStyleKey('outline_color', e.target.value)}
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                />
-              </label>
             </div>
           </div>
 

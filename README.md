@@ -2,7 +2,7 @@
 
 Turn long videos (YouTube URL or local upload) into viral-ready **9:16 short clips** for TikTok, Instagram Reels, and YouTube Shorts.
 
-**Pipeline:** ingest → transcribe (**Groq Whisper**) → detect viral moments (**Gemini**) → cut clips (**FFmpeg**) → reframe to **vertical 9:16** with face/subject tracking → **burn in subtitles** from word timestamps → optional **hook overlay** and **direct upload** to YouTube.
+**Pipeline:** ingest → transcribe (**Groq Whisper**) → detect viral moments (**Gemini**) → cut clips (**FFmpeg**) → reframe to **vertical 9:16** with face/subject tracking → **burn in subtitles** from word timestamps → optional **hook overlay**, **Voice-Over**, and **direct upload** to YouTube & TikTok.
 
 Ships as a **FastAPI backend** with an async job queue and a **React dashboard** (Vite + Tailwind).
 
@@ -99,6 +99,12 @@ To enable uploading clips to YouTube, place your OAuth client secret at
 `./client_secret.json` (downloaded from Google Cloud Console, "Desktop" app type).
 The dashboard's Settings page will then show a "Connect YouTube" button.
 
+### TikTok upload (optional)
+To enable uploading clips to TikTok, log into tiktok.com in your browser, export
+your cookies using a browser extension (Cookie-Editor or Get cookies.txt), and paste
+them in the dashboard's Settings → TikTok section. No API key or app audit required.
+Cookies expire after ~30 days and need to be re-imported.
+
 ## Local Development (without Docker)
 
 ### Backend
@@ -189,6 +195,11 @@ Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`)
 | POST | `/api/youtube/auth_url` | Begin YouTube OAuth (returns auth URL). |
 | POST | `/api/youtube/callback` | Complete YouTube OAuth (exchanges code for token). |
 | POST | `/api/youtube/upload` | Upload a clip to YouTube (OAuth). |
+| GET | `/api/tiktok/status` | TikTok connection status. |
+| POST | `/api/tiktok/connect` | Connect TikTok (import cookies). |
+| GET | `/api/tiktok/account` | Fetch connected TikTok account info. |
+| POST | `/api/tiktok/upload` | Upload a clip to TikTok (Playwright). |
+| POST | `/api/tiktok/logout` | Disconnect TikTok account. |
 | POST | `/api/cleanup` | Manually trigger output cleanup (older than `JOB_RETENTION_HOURS`). |
 
 ## Dashboard Features
@@ -199,7 +210,7 @@ Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`)
 - **Hook overlay** — add styled viral hook text (top / center / bottom, scalable).
 - **Gaming Cam + Gameplay** — for `content_type=gaming`, paste a single YouTube URL (or upload) and draw CAM + GAME boxes on a live preview; the backend downloads at 720p and crops/stacks them into a 9:16 vertical (`cam_top` / `game_top` / `side`).
 - **Library** — saved clips with metadata, download / delete.
-- **Settings** — enter API keys (encrypted in `localStorage`), pick Gemini model, YouTube OAuth connect, and trigger cleanup.
+- **Settings** — enter API keys (encrypted in `localStorage`), pick Gemini model, YouTube OAuth connect, TikTok cookie import, and trigger cleanup.
 
 ### Content Types
 
@@ -248,6 +259,7 @@ autoclipper/
   hooks.py             # hook text overlay rendering
   trending_youtube.py  # real YouTube trending (mostPopular + category filter)
   youtube_uploader.py  # YouTube OAuth upload
+  tiktok_uploader.py   # TikTok upload via Playwright (cookie-based)
   pipeline.py          # orchestration
   app.py               # FastAPI server + job queue + all endpoints
 dashboard/
@@ -255,7 +267,8 @@ dashboard/
     App.jsx
     api.js
     components/        # SubmitForm, TrendingPage, ClipGrid, SubtitleEditor,
-                       # HookModal, TranslateModal, YouTubeSettings, SettingsPage, ...
+                       # HookModal, TranslateModal, YouTubeSettings, TikTokSettings,
+                       # TikTokUploadModal, SettingsPage, ...
 ```
 
 ## Roadmap
@@ -266,6 +279,9 @@ dashboard/
 - [x] React dashboard
 - [x] Real YouTube trending (region + content type) with Gemini enrichment
 - [x] Hook overlay, YouTube OAuth upload
+- [x] TikTok upload via Playwright + session cookies (no API key needed)
+- [x] Chat Split — split long transcripts into multiple clips
+- [x] Enhance — AI-powered clip enhancement (hook + voice-over)
 - [x] Output auto-cleanup (`JOB_RETENTION_HOURS`)
 - [x] Gaming cam + gameplay split from a single video (YouTube URL or upload) → 9:16
 - [ ] Uploaded-clips tracking page (views + links per platform)
@@ -274,7 +290,7 @@ dashboard/
 
 - **Never commit secrets.** `.env`, `client_secret.json`, and the `output/` folder are git-ignored. Only `.env.example` (with placeholder values) is tracked.
 - API keys entered in the dashboard Settings page are stored in the browser's `localStorage` and sent only to the backend over your local network — they are **not** persisted server-side.
-- The YouTube OAuth token is written to the `yt_config` Docker volume, not to the repo.
+- The YouTube OAuth token and TikTok session cookies are stored encrypted per user in the SQLite database (Fernet encryption).
 
 ## Contributing
 

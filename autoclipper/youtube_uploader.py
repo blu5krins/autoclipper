@@ -15,7 +15,7 @@ from googleapiclient.http import MediaFileUpload
 
 from .utils import logger
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"]
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
 

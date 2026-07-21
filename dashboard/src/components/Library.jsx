@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, Play, Download, Trash2, Youtube, AudioLines } from 'lucide-react'
-import { listLibrary, libraryFileUrl, deleteLibraryClip, deleteLibraryFolder } from '../api.js'
+import { FolderOpen, Play, Download, Trash2, Youtube, Wand2, Users, Type } from 'lucide-react'
+import { listLibrary, libraryFileUrl, librarySrtUrl, deleteLibraryClip, deleteLibraryFolder } from '../api.js'
 import YouTubeUploadModal from './YouTubeUploadModal.jsx'
+import TikTokUploadModal from './TikTokUploadModal.jsx'
+import EnhanceModal from './EnhanceModal.jsx'
+import ChatSplitModal from './ChatSplitModal.jsx'
+import SubtitleEditor from './SubtitleEditor.jsx'
 
 export default function Library({ onVoiceOver }) {
   const [items, setItems] = useState([])
   const [error, setError] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [uploading, setUploading] = useState(null) // { name, clip }
+  const [tiktokUploading, setTiktokUploading] = useState(null) // { name, clip }
+  const [enhancing, setEnhancing] = useState(null) // { name, clip, hook }
+  const [chatSplitting, setChatSplitting] = useState(null) // { name, clip }
+  const [subtitling, setSubtitling] = useState(null) // { name, clip }
 
   function refresh() {
     listLibrary()
@@ -135,21 +143,43 @@ export default function Library({ onVoiceOver }) {
                           >
                             <Trash2 size={13} /> Delete
                           </button>
-                          {onVoiceOver && (
-                            <button
-                              onClick={() => onVoiceOver({ name: vid.name, filename: c.file, hook: c.hook })}
-                              className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-purple-500/15 text-purple-300
-                                         hover:bg-purple-500/25 transition-colors flex items-center justify-center gap-1"
-                            >
-                              <AudioLines size={13} /> Voice-Over
-                            </button>
-                          )}
+                          <button
+                            onClick={() => setSubtitling({ name: vid.name, clip: c })}
+                            className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-yellow-500/15 text-yellow-400
+                                       hover:bg-yellow-500/25 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <Type size={13} /> Subtitle
+                          </button>
+                          <button
+                            onClick={() => setEnhancing({ name: vid.name, clip: c, hook: c.hook })}
+                            className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-purple-500/15 text-purple-300
+                                       hover:bg-purple-500/25 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <Wand2 size={13} /> Enhance
+                          </button>
+                          <button
+                            onClick={() => setChatSplitting({ name: vid.name, clip: c })}
+                            className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-cyan-500/15 text-cyan-300
+                                       hover:bg-cyan-500/25 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <Users size={13} /> Split
+                          </button>
                           <button
                             onClick={() => setUploading({ name: vid.name, clip: c })}
                             className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-red-600/15 text-red-400
                                        hover:bg-red-600/25 transition-colors flex items-center justify-center gap-1"
                           >
                             <Youtube size={13} /> YouTube
+                          </button>
+                          <button
+                            onClick={() => setTiktokUploading({ name: vid.name, clip: c })}
+                            className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-[#fe2c55]/15 text-[#fe2c55]
+                                       hover:bg-[#fe2c55]/25 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1v-3.51a6.37 6.37 0 0 0-.79-.05A6.34 6.34 0 0 0 3.16 15.2a6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.34-6.34V8.73a8.19 8.19 0 0 0 4.78 1.53V6.81a4.84 4.84 0 0 1-1.03-.12z"/>
+                            </svg>
+                            TikTok
                           </button>
                         </div>
                       </div>
@@ -172,6 +202,48 @@ export default function Library({ onVoiceOver }) {
           }}
           onClose={() => setUploading(null)}
           onDone={() => setUploading(null)}
+        />
+      )}
+
+      {tiktokUploading && (
+        <TikTokUploadModal
+          source={{
+            name: tiktokUploading.name,
+            filename: tiktokUploading.clip.file,
+            title: tiktokUploading.clip.title,
+            description: tiktokUploading.clip.description,
+          }}
+          onClose={() => setTiktokUploading(null)}
+          onDone={() => setTiktokUploading(null)}
+        />
+      )}
+
+      {enhancing && (
+        <EnhanceModal
+          name={enhancing.name}
+          clip={enhancing.clip}
+          hook={enhancing.hook}
+          onClose={() => { setEnhancing(null); refresh() }}
+          onDone={() => { setEnhancing(null); refresh() }}
+        />
+      )}
+
+      {chatSplitting && (
+        <ChatSplitModal
+          name={chatSplitting.name}
+          clip={chatSplitting.clip}
+          onClose={() => { setChatSplitting(null); refresh() }}
+          onDone={() => { setChatSplitting(null); refresh() }}
+        />
+      )}
+
+      {subtitling && (
+        <SubtitleEditor
+          name={subtitling.name}
+          clip={subtitling.clip}
+          srtUrl={librarySrtUrl(subtitling.name, subtitling.clip.file)}
+          onApply={() => {}}
+          onClose={() => { setSubtitling(null); refresh() }}
         />
       )}
     </section>

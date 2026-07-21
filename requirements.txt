@@ -26,11 +26,15 @@ google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
 
-# Voice-over (local Kokoro TTS + Gemini TTS fallback)
+# TikTok upload via Playwright (browser automation with session cookies)
+playwright
+
+# Voice-over (local Kokoro TTS + Edge TTS + Gemini TTS fallback)
 kokoro==0.7.1
 misaki>=0.1.0
 onnxruntime==1.17.1
 soundfile==0.12.1
+edge-tts
 
 # User accounts + auth (register/login, per-user API keys)
 sqlmodel>=0.0.22
