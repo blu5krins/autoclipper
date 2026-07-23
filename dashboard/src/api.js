@@ -71,7 +71,15 @@ export async function saveSettings(settings) {
     try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
     throw new Error(detail || 'Failed to save settings')
   }
-  return res.json()
+  const data = await res.json()
+  return {
+    groqKey: data.groq_key || '',
+    geminiKey: data.gemini_key || '',
+    youtubeApiKey: data.youtube_api_key || '',
+    geminiModel: data.gemini_model || '',
+    whisperModel: data.whisper_model || '',
+    youtubeCookies: data.youtube_cookies || '',
+  }
 }
 
 // Authenticated fetch with the bearer token; 401 triggers logout.
