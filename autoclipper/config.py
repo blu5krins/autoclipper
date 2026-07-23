@@ -1,5 +1,6 @@
 """Central configuration loaded from environment / .env."""
 import os
+import time
 
 from dotenv import load_dotenv
 
@@ -12,6 +13,42 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # --- Models ---
 GROQ_WHISPER_MODEL = os.environ.get("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+
+# Fallback models tried in order when the primary is overloaded (503).
+GEMINI_FALLBACK_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+]
+
+
+def gemini_generate(client, model: str, contents, max_retries: int = 2, **kwargs):
+    """Call Gemini with automatic retry + fallback on 503 overload.
+
+    Tries the primary model up to max_retries times, then falls through
+    to GEMINI_FALLBACK_MODELS (one attempt each).
+    """
+    from google.api_core import exceptions as gexc  # noqa: E402
+
+    models_to_try = [model] + GEMINI_FALLBACK_MODELS
+    last_err = None
+    for m in models_to_try:
+        for attempt in range(max_retries + 1):
+            try:
+                return client.models.generate_content(model=m, contents=contents, **kwargs)
+            except (gexc.ServiceUnavailable, gexc.ResourceExhausted) as e:
+                last_err = e
+                if attempt < max_retries:
+                    wait = 2 ** attempt
+                    from .utils import logger
+                    logger.warning("Gemini 503 on %s (attempt %d); retrying in %ds", m, attempt + 1, wait)
+                    time.sleep(wait)
+                else:
+                    from .utils import logger
+                    logger.warning("Gemini %s exhausted retries; trying next fallback", m)
+                break
+            except Exception:
+                raise  # non-transient errors propagate immediately
+    raise last_err or RuntimeError("All Gemini models failed")
 
 # --- Content-type analysis modes ---
 # Each mode tailors the Gemini prompt for better-targeted viral clips.

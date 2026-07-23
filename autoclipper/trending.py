@@ -59,7 +59,7 @@ def get_trending_ideas(niche: str = "general", api_key: str = None,
 
     logger.info("Generating trending ideas for niche '%s' with model '%s'...", niche, model)
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(model=model, contents=prompt)
+    response = config.gemini_generate(client, model, prompt)
     raw = (response.text or "").strip()
 
     ideas = _parse_ideas(raw)

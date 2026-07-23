@@ -97,7 +97,7 @@ def find_viral_clips(transcript: dict, api_key: str = None, model: str = None,
 
     logger.info("Analyzing transcript with Gemini model '%s'...", model)
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(model=model, contents=prompt)
+    response = config.gemini_generate(client, model, prompt)
     raw = (response.text or "").strip()
 
     clips = _parse_clips(raw)

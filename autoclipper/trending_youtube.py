@@ -201,7 +201,7 @@ def enrich_trending(videos: list, niche: str = "general",
 
     logger.info("Enriching %d trending videos with Gemini...", len(videos))
     client = genai.Client(api_key=gem_key)
-    response = client.models.generate_content(model=model, contents=prompt)
+    response = config.gemini_generate(client, model, prompt)
     raw = (response.text or "").strip()
 
     text = raw.strip()
