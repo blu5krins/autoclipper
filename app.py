@@ -1151,7 +1151,7 @@ async def enhance_draft(req: EnhanceDraftRequest, current: User = Depends(get_cu
         from google import genai
         client = genai.Client(api_key=gemini_key)
         resp = client.models.generate_content(
-            model="gemini-2.0-flash", contents=prompt
+            model="gemini-3.5-flash", contents=prompt
         )
         draft = (resp.text or "").strip().strip('"').strip()
     except Exception as e:  # noqa: BLE001

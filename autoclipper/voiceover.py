@@ -170,7 +170,7 @@ def generate_with_gemini(text: str, out_wav: str, api_key: str, voice: str = "ac
         raise RuntimeError("Gemini API key is required for Gemini TTS (set it in Settings).")
     client = genai.Client(api_key=api_key)
     response = client.models.generate_content(
-        model="gemini-2.5-flash-preview-tts",
+        model="gemini-3.1-flash-tts-preview",
         contents=text,
         config={
             "response_modalities": ["AUDIO"],
