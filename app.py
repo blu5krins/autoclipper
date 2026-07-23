@@ -1590,6 +1590,11 @@ class FacebookCallbackRequest(BaseModel):
     redirect_uri: str
 
 
+class FacebookAppSettingsRequest(BaseModel):
+    app_id: str
+    app_secret: str
+
+
 class FacebookUploadRequest(BaseModel):
     job_id: Optional[str] = None
     name: Optional[str] = None
@@ -1768,8 +1773,10 @@ async def facebook_upload(
 
 @app.post("/api/facebook/app_settings")
 async def facebook_app_settings(
-    app_id: str, app_secret: str, current: User = Depends(get_current_user)
+    req: FacebookAppSettingsRequest, current: User = Depends(get_current_user)
 ):
+    app_id = req.app_id.strip()
+    app_secret = req.app_secret.strip()
     """Save Facebook App ID and App Secret."""
     with user_db.Session(user_db.engine) as session:
         db_user = session.get(User, current.id)

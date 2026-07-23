@@ -34,8 +34,9 @@ export default function FacebookSettings() {
   useEffect(() => {
     load()
     const params = new URLSearchParams(window.location.search)
-    const code = params.get('fb_code')
-    if (code) {
+    const code = params.get('code')
+    const state = params.get('state')
+    if (code && state === 'facebook') {
       setBusy(true)
       facebookCallback(code, window.location.origin + window.location.pathname)
         .then(() => {

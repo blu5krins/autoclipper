@@ -115,7 +115,7 @@ To enable uploading clips to Facebook Pages:
 1. Create a Facebook App at [developers.facebook.com](https://developers.facebook.com)
    - App Type: **Business**
    - Add **Facebook Login** product
-   - Set Valid OAuth Redirect URIs to your app URL (e.g. `http://localhost:5173/`)
+   - Set Valid OAuth Redirect URIs to your app URL (e.g. `https://clipper.example.com/settings/` or `http://localhost:5173/settings/`)
 2. Go to Settings → Basic → copy **App ID** and **App Secret**
 3. In dashboard Settings → Facebook Pages → click **App Settings**
 4. Paste App ID and App Secret, click Save
@@ -123,6 +123,10 @@ To enable uploading clips to Facebook Pages:
 6. Select which Page to upload to
 
 Required permissions: `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `publish_video`
+
+> **Note:** Pages must be created directly on Facebook (not via Meta Business Suite)
+> to appear in the API. The redirect URI must match **exactly** (including trailing
+> slash and `https` vs `http`).
 
 ## Local Development (without Docker)
 
@@ -238,7 +242,7 @@ Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`)
 - **Hook overlay** — add styled viral hook text (top / center / bottom, scalable).
 - **Gaming Cam + Gameplay** — for `content_type=gaming`, paste a single YouTube URL (or upload) and draw CAM + GAME boxes on a live preview; the backend downloads at 720p and crops/stacks them into a 9:16 vertical (`cam_top` / `game_top` / `side`).
 - **Library** — saved clips with metadata, download / delete.
-- **Settings** — enter API keys (encrypted in `localStorage`), pick Gemini model, YouTube OAuth connect, TikTok cookie import, Facebook Pages connect, and trigger cleanup.
+- **Settings** — enter API keys (encrypted server-side, shown masked), pick Gemini model, YouTube OAuth connect, TikTok cookie import, Facebook Pages connect, and trigger cleanup.
 - **Upload Time Suggestion** — tooltip on upload buttons shows optimal posting times (WIB) with countdown and visual timeline.
 
 ### Content Types
@@ -289,7 +293,7 @@ autoclipper/
   trending_youtube.py  # real YouTube trending (mostPopular + category filter)
   youtube_uploader.py  # YouTube OAuth upload
   tiktok_uploader.py   # TikTok upload via Patchright (cookie-based, best-effort)
-  facebook_uploader.py # Facebook Pages upload via Graph API (OAuth + Resumable Upload)
+  facebook_uploader.py # Facebook Pages upload via Graph API (OAuth + direct upload)
   voiceover.py         # Voice-over engines (Kokoro, Edge TTS, Gemini TTS)
   pipeline.py          # orchestration (incremental clip generation)
   app.py               # FastAPI server + job queue + all endpoints
@@ -312,7 +316,7 @@ dashboard/
 - [x] Real YouTube trending (region + content type) with Gemini enrichment
 - [x] Hook overlay, YouTube OAuth upload
 - [x] TikTok upload via Playwright + session cookies (no API key needed)
-- [x] Facebook Pages upload via Graph API (OAuth + Resumable Upload)
+- [x] Facebook Pages upload via Graph API (OAuth + direct upload)
 - [x] Chat Split — split long transcripts into multiple clips
 - [x] Enhance — AI-powered clip enhancement (hook + voice-over)
 - [x] Output auto-cleanup (`JOB_RETENTION_HOURS`)
@@ -325,7 +329,7 @@ dashboard/
 ## Security
 
 - **Never commit secrets.** `.env`, `client_secret.json`, and the `output/` folder are git-ignored. Only `.env.example` (with placeholder values) is tracked.
-- API keys entered in the dashboard Settings page are stored in the browser's `localStorage` and sent only to the backend over your local network — they are **not** persisted server-side.
+- API keys entered in the dashboard Settings page are stored encrypted at rest in the SQLite database (per-user, Fernet encryption). Keys are returned masked in the UI and decrypted only when needed for API calls.
 - The YouTube OAuth token, TikTok session cookies, and Facebook OAuth token are stored encrypted per user in the SQLite database (Fernet encryption).
 
 ## Contributing

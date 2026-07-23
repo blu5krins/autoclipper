@@ -41,7 +41,8 @@ export default function YouTubeSettings() {
     load()
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
-    if (code) {
+    const state = params.get('state')
+    if (code && state !== 'facebook') {
       setBusy(true)
       youtubeCallback(code)
         .then(() => {

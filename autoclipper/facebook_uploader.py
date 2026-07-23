@@ -41,6 +41,7 @@ def get_auth_url(app_id: str, redirect_uri: str) -> str:
         f"&redirect_uri={redirect_uri}"
         f"&scope={scope}"
         f"&response_type=code"
+        f"&state=facebook"
     )
 
 
@@ -172,7 +173,7 @@ def upload_video_to_page(
     user_token: str = None,
     app_id: str = None,
 ) -> dict:
-    """Upload a video to a Facebook Page using Resumable Upload API.
+    """Upload a video to a Facebook Page.
 
     video_path: local path to the video file
     page_id: target Facebook Page ID
@@ -180,8 +181,8 @@ def upload_video_to_page(
     title: video title
     description: video description
     as_reel: if True, publish as Reel
-    user_token: user access token (needed for upload session)
-    app_id: Facebook App ID (needed for upload session)
+    user_token: user access token (needed for resumable upload)
+    app_id: Facebook App ID (needed for resumable upload)
     """
     if not os.path.isfile(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
@@ -190,50 +191,21 @@ def upload_video_to_page(
     file_length = os.path.getsize(video_path)
     file_type = "video/mp4"
 
-    # Use page token for upload session if no user token provided
-    upload_token = user_token or page_access_token
-    upload_app_id = app_id or "me"
-
-    logger.info("Facebook: starting upload session for %s (%d MB)", file_name, file_length // (1024 * 1024))
-
-    # Step 1: Start upload session
-    session_id = _start_upload_session(
-        upload_app_id, upload_token, file_name, file_length, file_type
-    )
-    logger.info("Facebook: upload session %s started", session_id)
-
-    # Step 2: Upload file in chunks (10 MB chunks)
-    CHUNK_SIZE = 10 * 1024 * 1024
-    offset = 0
+    logger.info("Facebook: uploading %s (%d MB) to page %s", file_name, file_length // (1024 * 1024), page_id)
 
     with open(video_path, "rb") as f:
-        while offset < file_length:
-            chunk = f.read(CHUNK_SIZE)
-            if not chunk:
-                break
-            _upload_chunk(upload_token, session_id, chunk, offset)
-            offset += len(chunk)
-            pct = int(offset / file_length * 100)
-            logger.info("Facebook upload: %d%%", pct)
+        resp = requests.post(
+            f"{GRAPH_URL}/{page_id}/videos",
+            data={
+                "title": title or "Video",
+                "description": description or "",
+                "access_token": page_access_token,
+                **({"upload_settings": '{"upload_phase":"finish","upload_session_id":"skip"}'} if as_reel else {}),
+            },
+            files={"source": (file_name, f, file_type)},
+            timeout=300,
+        )
 
-    logger.info("Facebook: upload complete, publishing to page %s", page_id)
-
-    # Step 3: Publish video to Page
-    publish_data = {
-        "title": title or "Video",
-        "description": description or "",
-        "uploaded_video": session_id,
-        "access_token": page_access_token,
-    }
-
-    if as_reel:
-        publish_data["upload_settings"] = '{"upload_phase":"finish","upload_session_id":"%s"}' % session_id
-
-    resp = requests.post(
-        f"{GRAPH_URL}/{page_id}/videos",
-        data=publish_data,
-        timeout=60,
-    )
     resp.raise_for_status()
     result = resp.json()
 
