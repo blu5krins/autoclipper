@@ -236,7 +236,7 @@ Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`)
 | `GEMINI_API_KEY` | — | Required. Gemini for viral detection + trending ideas. |
 | `YOUTUBE_API_KEY` | — | YouTube Data API v3 key for trending + view counts. |
 | `GROQ_API_KEY` | — | Required. Groq Whisper transcription. |
-| `GEMINI_MODEL` | `gemini-3.5-flash` | Gemini model. |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Gemini model (e.g. `gemini-3.5-flash`, `gemini-3-flash`). |
 | `GROQ_WHISPER_MODEL` | `whisper-large-v3-turbo` | Whisper model (Groq cloud). |
 | `YOUTUBE_REGION` | `ID` | Default region for trending. |
 | `MAX_CONCURRENT_JOBS` | `2` | Concurrent processing limit (semaphore). |
