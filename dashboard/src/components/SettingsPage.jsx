@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { KeyRound, Cpu, ToggleLeft, Save, Check, Trash2 } from 'lucide-react'
 import SettingsPanel from './SettingsPanel.jsx'
 import YouTubeSettings from './YouTubeSettings.jsx'
-import TikTokSettings from './TikTokSettings.jsx'
 import FacebookSettings from './FacebookSettings.jsx'
 import { runCleanup, saveSettings } from '../api.js'
 
@@ -97,8 +96,6 @@ export default function SettingsPage({ settings, setSettings }) {
         </section>
 
         <YouTubeSettings />
-
-        <TikTokSettings />
 
         <FacebookSettings />
 

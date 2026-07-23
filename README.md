@@ -1,8 +1,8 @@
 # AutoClipper
 
-Turn long videos (YouTube URL or local upload) into viral-ready **9:16 short clips** for TikTok, Instagram Reels, and YouTube Shorts.
+Turn long videos (YouTube URL or local upload) into viral-ready **9:16 short clips** for YouTube Shorts, Instagram Reels, and Facebook Reels.
 
-**Pipeline:** ingest → transcribe (**Groq Whisper**) → detect viral moments (**Gemini**) → cut clips (**FFmpeg**) → reframe to **vertical 9:16** with face/subject tracking → **burn in subtitles** from word timestamps → optional **hook overlay**, **Voice-Over**, and **direct upload** to YouTube & TikTok.
+**Pipeline:** ingest → transcribe (**Groq Whisper**) → detect viral moments (**Gemini**) → cut clips (**FFmpeg**) → reframe to **vertical 9:16** with face/subject tracking → **burn in subtitles** from word timestamps → optional **hook overlay**, **Voice-Over**, and **direct upload** to YouTube & Facebook Pages.
 
 Ships as a **FastAPI backend** with an async job queue and a **React dashboard** (Vite + Tailwind).
 
@@ -98,16 +98,6 @@ docker compose -p autoclipper restart frontend   # restart the dashboard
 To enable uploading clips to YouTube, place your OAuth client secret at
 `./client_secret.json` (downloaded from Google Cloud Console, "Desktop" app type).
 The dashboard's Settings page will then show a "Connect YouTube" button.
-
-### TikTok upload (optional)
-To enable uploading clips to TikTok, log into tiktok.com in your browser, export
-your cookies using a browser extension (Cookie-Editor or Get cookies.txt), and paste
-them in the dashboard's Settings → TikTok section. No API key or app audit required.
-Cookies expire after ~30 days and need to be re-imported.
-
-> **Note:** TikTok's aggressive anti-bot detection blocks all browser automation
-> (Playwright, Patchright, Selenium). Upload and account info are best-effort —
-> manual upload may be required.
 
 ### Facebook Pages upload (optional)
 To enable uploading clips to Facebook Pages:
@@ -220,11 +210,6 @@ Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`)
 | POST | `/api/youtube/auth_url` | Begin YouTube OAuth (returns auth URL). |
 | POST | `/api/youtube/callback` | Complete YouTube OAuth (exchanges code for token). |
 | POST | `/api/youtube/upload` | Upload a clip to YouTube (OAuth). |
-| GET | `/api/tiktok/status` | TikTok connection status. |
-| POST | `/api/tiktok/connect` | Connect TikTok (import cookies). |
-| GET | `/api/tiktok/account` | Fetch connected TikTok account info. |
-| POST | `/api/tiktok/upload` | Upload a clip to TikTok (Playwright). |
-| POST | `/api/tiktok/logout` | Disconnect TikTok account. |
 | GET | `/api/facebook/status` | Facebook connection status. |
 | GET | `/api/facebook/pages` | List managed Facebook Pages. |
 | POST | `/api/facebook/auth_url` | Generate Facebook Login OAuth URL. |
@@ -242,7 +227,7 @@ Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`)
 - **Hook overlay** — add styled viral hook text (top / center / bottom, scalable).
 - **Gaming Cam + Gameplay** — for `content_type=gaming`, paste a single YouTube URL (or upload) and draw CAM + GAME boxes on a live preview; the backend downloads at 720p and crops/stacks them into a 9:16 vertical (`cam_top` / `game_top` / `side`).
 - **Library** — saved clips with metadata, download / delete.
-- **Settings** — enter API keys (encrypted server-side, shown masked), pick Gemini model, YouTube OAuth connect, TikTok cookie import, Facebook Pages connect, and trigger cleanup.
+- **Settings** — enter API keys (encrypted server-side, shown masked), pick Gemini model, YouTube OAuth connect, Facebook Pages connect, and trigger cleanup.
 - **Upload Time Suggestion** — tooltip on upload buttons shows optimal posting times (WIB) with countdown and visual timeline.
 
 ### Content Types
@@ -292,7 +277,6 @@ autoclipper/
   hooks.py             # hook text overlay rendering
   trending_youtube.py  # real YouTube trending (mostPopular + category filter)
   youtube_uploader.py  # YouTube OAuth upload
-  tiktok_uploader.py   # TikTok upload via Patchright (cookie-based, best-effort)
   facebook_uploader.py # Facebook Pages upload via Graph API (OAuth + direct upload)
   voiceover.py         # Voice-over engines (Kokoro, Edge TTS, Gemini TTS)
   pipeline.py          # orchestration (incremental clip generation)
@@ -302,8 +286,8 @@ dashboard/
     App.jsx
     api.js
     components/        # SubmitForm, TrendingPage, ClipGrid, SubtitleEditor,
-                       # HookModal, TranslateModal, YouTubeSettings, TikTokSettings,
-                       # FacebookSettings, TikTokUploadModal, YouTubeUploadModal,
+                       # HookModal, TranslateModal, YouTubeSettings,
+                       # FacebookSettings, YouTubeUploadModal,
                        # FacebookUploadModal, UploadTimeSuggestion, SettingsPage, ...
 ```
 
@@ -315,7 +299,6 @@ dashboard/
 - [x] React dashboard
 - [x] Real YouTube trending (region + content type) with Gemini enrichment
 - [x] Hook overlay, YouTube OAuth upload
-- [x] TikTok upload via Playwright + session cookies (no API key needed)
 - [x] Facebook Pages upload via Graph API (OAuth + direct upload)
 - [x] Chat Split — split long transcripts into multiple clips
 - [x] Enhance — AI-powered clip enhancement (hook + voice-over)
@@ -330,7 +313,7 @@ dashboard/
 
 - **Never commit secrets.** `.env`, `client_secret.json`, and the `output/` folder are git-ignored. Only `.env.example` (with placeholder values) is tracked.
 - API keys entered in the dashboard Settings page are stored encrypted at rest in the SQLite database (per-user, Fernet encryption). Keys are returned masked in the UI and decrypted only when needed for API calls.
-- The YouTube OAuth token, TikTok session cookies, and Facebook OAuth token are stored encrypted per user in the SQLite database (Fernet encryption).
+- The YouTube OAuth token and Facebook OAuth token are stored encrypted per user in the SQLite database (Fernet encryption).
 
 ## Contributing
 

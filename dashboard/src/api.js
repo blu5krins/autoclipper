@@ -449,56 +449,6 @@ export async function youtubeUpload(payload) {
   return res.json()
 }
 
-// ── TikTok ─────────────────────────────────────────────────────────────────
-
-export async function tiktokStatus() {
-  const res = await authFetch(`${API_URL}/api/tiktok/status`)
-  if (!res.ok) {
-    let detail = ''
-    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
-    throw new Error(`TikTok status failed (${res.status}) ${detail}`)
-  }
-  return res.json()
-}
-
-export async function tiktokConnect(cookies) {
-  const res = await authFetch(`${API_URL}/api/tiktok/connect`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cookies }),
-  })
-  if (!res.ok) {
-    let detail = ''
-    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
-    throw new Error(`TikTok connect failed (${res.status}) ${detail}`)
-  }
-  return res.json()
-}
-
-export async function tiktokUpload(payload) {
-  const res = await authFetch(`${API_URL}/api/tiktok/upload`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!res.ok) {
-    let detail = ''
-    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
-    throw new Error(`TikTok upload failed (${res.status}) ${detail}`)
-  }
-  return res.json()
-}
-
-export async function tiktokLogout() {
-  const res = await authFetch(`${API_URL}/api/tiktok/logout`, { method: 'POST' })
-  if (!res.ok) {
-    let detail = ''
-    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
-    throw new Error(`TikTok logout failed (${res.status}) ${detail}`)
-  }
-  return res.json()
-}
-
 // ── Facebook Pages ─────────────────────────────────────────────────────────
 
 export async function facebookStatus() {

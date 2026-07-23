@@ -56,10 +56,10 @@ engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread"
 def init_db() -> None:
     """Create tables. Idempotent; safe to call on startup."""
     SQLModel.metadata.create_all(engine)
-    # Migrate: add tiktok_cookies column if missing (for existing DBs)
+    # Migrate: add facebook_token column if missing (for existing DBs)
     with engine.connect() as conn:
         try:
-            conn.exec_driver_sql("ALTER TABLE user ADD COLUMN tiktok_cookies TEXT")
+            conn.exec_driver_sql("ALTER TABLE user ADD COLUMN facebook_token TEXT")
             conn.commit()
         except Exception:
             pass  # column already exists
@@ -82,7 +82,6 @@ class User(SQLModel, table=True):
     whisper_model: str | None = None
     youtube_cookies: str | None = None
     youtube_token: str | None = None  # encrypted JSON of the OAuth credentials
-    tiktok_cookies: str | None = None  # encrypted JSON of TikTok session cookies
     facebook_token: str | None = None  # encrypted JSON of Facebook OAuth token
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -173,16 +172,6 @@ def save_youtube_token(user: User, token_json: str) -> None:
 def load_youtube_token(user: User) -> Optional[str]:
     """Return the user's YouTube OAuth token JSON, decrypted (or None)."""
     return decrypt_value(user.youtube_token)
-
-
-def save_tiktok_cookies(user: User, cookies_json: str) -> None:
-    """Encrypt and store the user's TikTok session cookies (JSON string)."""
-    user.tiktok_cookies = encrypt_value(cookies_json)
-
-
-def load_tiktok_cookies(user: User) -> Optional[str]:
-    """Return the user's TikTok session cookies JSON, decrypted (or None)."""
-    return decrypt_value(user.tiktok_cookies)
 
 
 def save_facebook_token(user: User, token_data: dict) -> None:

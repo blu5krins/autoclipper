@@ -26,11 +26,6 @@ google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
 
-# TikTok upload via Playwright (browser automation with session cookies)
-playwright
-patchright
-curl_cffi
-
 # Voice-over (local Kokoro TTS + Edge TTS + Gemini TTS fallback)
 kokoro==0.7.1
 misaki>=0.1.0

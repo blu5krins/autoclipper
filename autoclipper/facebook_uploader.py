@@ -18,6 +18,7 @@ SCOPES = [
     "pages_read_engagement",
     "pages_manage_posts",
     "publish_video",
+    "business_management",
 ]
 
 CONFIG_DIR = os.environ.get(
@@ -79,14 +80,55 @@ def exchange_long_lived(user_token: str, app_id: str, app_secret: str) -> dict:
 
 
 def get_pages(user_token: str) -> list[dict]:
-    """Fetch Pages the user has access to."""
-    resp = requests.get(
-        f"{GRAPH_URL}/me/accounts",
-        params={"access_token": user_token, "fields": "id,name,access_token,category"},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json().get("data", [])
+    """Fetch Pages the user has access to (personal + business-managed)."""
+    pages = []
+
+    # 1. Direct pages (personal admin)
+    try:
+        resp = requests.get(
+            f"{GRAPH_URL}/me/accounts",
+            params={"access_token": user_token, "fields": "id,name,access_token,category"},
+            timeout=15,
+        )
+        if resp.ok:
+            pages.extend(resp.json().get("data", []))
+    except Exception:
+        pass
+
+    # 2. Business-managed pages
+    try:
+        biz_resp = requests.get(
+            f"{GRAPH_URL}/me",
+            params={"access_token": user_token, "fields": "businesses{id,name}"},
+            timeout=15,
+        )
+        if biz_resp.ok:
+            for biz in biz_resp.json().get("businesses", {}).get("data", []):
+                biz_id = biz.get("id")
+                if not biz_id:
+                    continue
+                try:
+                    page_resp = requests.get(
+                        f"{GRAPH_URL}/{biz_id}/pages",
+                        params={"access_token": user_token, "fields": "id,name,access_token,category"},
+                        timeout=15,
+                    )
+                    if page_resp.ok:
+                        pages.extend(page_resp.json().get("data", []))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # Deduplicate by page ID
+    seen = set()
+    unique = []
+    for p in pages:
+        pid = p.get("id")
+        if pid and pid not in seen:
+            seen.add(pid)
+            unique.append(p)
+    return unique
 
 
 def save_token(data: dict):
