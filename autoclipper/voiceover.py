@@ -9,6 +9,7 @@ Engines:
 The resulting WAV is mixed into a clip via FFmpeg (overlay = mix on top of the
 original audio, replace = dub over the original audio).
 """
+import asyncio
 import base64
 import os
 import subprocess
@@ -62,17 +63,33 @@ def edge_voices() -> list:
 
 
 def generate_with_edge(text: str, out_wav: str, voice: str = "id-ID-GadisNeural") -> str:
-    """Generate a WAV using Microsoft Edge TTS via CLI (free, no API key).
+    """Generate a WAV using Microsoft Edge TTS (free, no API key).
 
-    edge-tts outputs MP3 (not WAV), so we convert to proper WAV with ffmpeg.
+    Uses the edge-tts Python API. Outputs MP3, then converts to WAV with ffmpeg.
     """
+    import edge_tts as _edge
+    import concurrent.futures
+
     tmp_mp3 = out_wav + ".tmp.mp3"
-    subprocess.run(
-        ["edge-tts", "--text", text, "--voice", voice, "--write-media", tmp_mp3],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+
+    async def _gen():
+        communicate = _edge.Communicate(text, voice)
+        await communicate.save(tmp_mp3)
+
+    def _run_async():
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            # Already inside an event loop (e.g. FastAPI) — run in a thread.
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                pool.submit(asyncio.run, _gen()).result()
+        else:
+            asyncio.run(_gen())
+
+    _run_async()
+
     subprocess.run(
         ["ffmpeg", "-y", "-i", tmp_mp3, "-acodec", "pcm_s16le",
          "-ar", "24000", "-ac", "1", out_wav],

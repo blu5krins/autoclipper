@@ -70,8 +70,14 @@ def run(
     min_clip: float = None,
     max_clip: float = None,
     content_type: str = None,
+    on_clip=None,
 ) -> dict:
-    """Run the full auto-clip pipeline and return a result summary dict."""
+    """Run the full auto-clip pipeline and return a result summary dict.
+
+    If *on_clip* is provided it will be called with ``(clip_dict, index, total)``
+    after each clip is fully processed (cut + reframe + subtitle), enabling the
+    caller to stream partial results to the frontend.
+    """
     ensure_ffmpeg()
     start_time = time.time()
 
@@ -113,48 +119,52 @@ def run(
 
     # 4. Cut clips (FFmpeg)
     clips = cut_all(video_path, clip_candidates, output_dir, base_name)
+    total_clips = len(clips)
 
-    # 4b. Chat-split: convert horizontal clips to 9:16 split-screen (two people)
-    if split_screen:
-        from .gaming_layout import auto_chat_split_clip as _auto_split
-        for clip in clips:
+    # Process each clip one-by-one so that partial results stream to the UI.
+    processed = []
+    for idx, clip in enumerate(clips):
+        # 4b. Chat-split
+        if split_screen:
+            from .gaming_layout import auto_chat_split_clip as _auto_split
             src = os.path.join(output_dir, clip["file"])
-            if not os.path.exists(src):
-                continue
-            s_name = clip["file"].rsplit(".", 1)[0] + "_split.mp4"
-            s_path = os.path.join(output_dir, s_name)
+            if os.path.exists(src):
+                s_name = clip["file"].rsplit(".", 1)[0] + "_split.mp4"
+                s_path = os.path.join(output_dir, s_name)
+                try:
+                    _auto_split(src, s_path)
+                    os.remove(src)
+                    clip["file"] = s_name
+                    clip["split_screen"] = True
+                    logger.info("Chat-split applied to %s -> %s", src, s_name)
+                except Exception as e:
+                    logger.warning("Chat-split skipped for %s: %s", src, e)
+
+        # 5. Reframe to vertical 9:16
+        if vertical and not clip.get("split_screen"):
+            src = os.path.join(output_dir, clip["file"])
+            if os.path.exists(src):
+                v_name = clip["file"].rsplit(".", 1)[0] + "_9x16.mp4"
+                v_path = os.path.join(output_dir, v_name)
+                if reframe_clip(src, v_path, use_yolo=use_yolo):
+                    clip["vertical_file"] = v_name
+                    os.remove(src)
+                    clip["file"] = v_name
+
+        # 6. Generate subtitle tracks (SRT)
+        if subtitles:
+            add_subtitles([clip], transcript, output_dir, burn=False)
+
+        processed.append(clip)
+
+        # Notify caller that this clip is ready
+        if on_clip is not None:
             try:
-                _auto_split(src, s_path)
-                os.remove(src)
-                clip["file"] = s_name
-                clip["split_screen"] = True
-                logger.info("Chat-split applied to %s -> %s", src, s_name)
-            except Exception as e:
-                logger.warning("Chat-split skipped for %s: %s", src, e)
+                on_clip(clip, idx + 1, total_clips)
+            except Exception:
+                pass
 
-    # 5. Reframe to vertical 9:16 with face/subject tracking.
-    #    Skip reframing for clips that already have split-screen applied.
-    if vertical:
-        for clip in clips:
-            if clip.get("split_screen"):
-                continue
-            src = os.path.join(output_dir, clip["file"])
-            if not os.path.exists(src):
-                continue
-            v_name = clip["file"].rsplit(".", 1)[0] + "_9x16.mp4"
-            v_path = os.path.join(output_dir, v_name)
-            if reframe_clip(src, v_path, use_yolo=use_yolo):
-                clip["vertical_file"] = v_name
-                os.remove(src)
-                clip["file"] = v_name
-
-    # 6. Generate subtitle tracks (SRT) for the on-demand "Auto Subtitle" burn.
-    #    Clips are NOT burned during generation -- matching OpenShorts, the
-    #    burn only happens when the user clicks "Auto Subtitle" on a clip.
-    if subtitles:
-        add_subtitles(clips, transcript, output_dir, burn=False)
-
-    # 5. Persist metadata
+    # 7. Persist metadata
     result = {
         "title": title,
         "source": source,
@@ -162,15 +172,15 @@ def run(
         "video_file": os.path.basename(video_path),
         "language": transcript.get("language"),
         "duration": transcript.get("duration"),
-        "clips": clips,
+        "clips": processed,
         "elapsed_seconds": round(time.time() - start_time, 1),
     }
     metadata_path = os.path.join(output_dir, f"{base_name}_metadata.json")
     write_json(metadata_path, {**result, "transcript": transcript})
 
-    # 6. Save clips into the Saved Library (folder per source video).
+    # 8. Save clips into the Saved Library (folder per source video).
     try:
-        library_path = save_to_library(output_dir, title, result["job_id"], clips)
+        library_path = save_to_library(output_dir, title, result["job_id"], processed)
         result["library_path"] = os.path.relpath(library_path, output_dir)
     except Exception as e:  # noqa: BLE001
         logger.warning("Could not save to library: %s", e)
@@ -178,7 +188,7 @@ def run(
     logger.info(
         "Done in %.1fs — %d clip(s) written to %s",
         result["elapsed_seconds"],
-        len(clips),
+        len(processed),
         output_dir,
     )
     return result

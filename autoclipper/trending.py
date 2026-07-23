@@ -4,9 +4,18 @@ Generates platform-aware, viral short-video content ideas that creators can
 record or repurpose. No external API keys beyond Gemini are required.
 """
 import json
+import re
 
 from . import config
 from .utils import logger
+
+
+def _repair_json(text: str) -> str:
+    """Fix common Gemini JSON issues: missing commas between array elements."""
+    text = re.sub(r'\}\s*\{', '}, {', text)
+    text = re.sub(r'\]\s*\[', '], [', text)
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+    return text
 
 
 TRENDING_PROMPT = """You are a viral short-form video strategist. Based on current \
@@ -76,8 +85,12 @@ def _parse_ideas(raw: str) -> list:
 
     try:
         data = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Could not parse Gemini response as JSON: {e}\nRaw: {raw[:500]}")
+    except json.JSONDecodeError:
+        repaired = _repair_json(text)
+        try:
+            data = json.loads(repaired)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Could not parse Gemini response as JSON: {e}\nRaw: {raw[:500]}")
 
     if isinstance(data, list):
         return data

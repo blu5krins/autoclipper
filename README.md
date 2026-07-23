@@ -105,6 +105,10 @@ your cookies using a browser extension (Cookie-Editor or Get cookies.txt), and p
 them in the dashboard's Settings → TikTok section. No API key or app audit required.
 Cookies expire after ~30 days and need to be re-imported.
 
+> **Note:** TikTok's aggressive anti-bot detection blocks all browser automation
+> (Playwright, Patchright, Selenium). Upload and account info are best-effort —
+> manual upload may be required.
+
 ## Local Development (without Docker)
 
 ### Backend
@@ -149,11 +153,13 @@ sends them in the request body.
 ## Voice-Over
 
 Add a narrated audio track to any generated/library clip from the **Voice-Over** page
-(sidebar). Two engines:
+(sidebar). Three engines:
 
 - **Kokoro** (default for English-ish text) — local, free, no API key. Runs in-container
   via ONNX; the model is cached in the `kokoro_cache` volume.
-- **Gemini TTS** (default for Indonesian / when `engine=gemini`) — cloud TTS using the
+- **Edge TTS** (default for Indonesian / when `engine=edge`) — cloud TTS using
+  Microsoft Edge's free TTS API. Uses Python API (`edge_tts.Communicate`).
+- **Gemini TTS** (when `engine=gemini`) — cloud TTS using the
   user's stored `GEMINI_API_KEY`. More natural for Bahasa Indonesia.
 
 Engine selection is automatic (`auto`): English-like text → Kokoro, Indonesian → Gemini.
@@ -211,6 +217,7 @@ Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`)
 - **Gaming Cam + Gameplay** — for `content_type=gaming`, paste a single YouTube URL (or upload) and draw CAM + GAME boxes on a live preview; the backend downloads at 720p and crops/stacks them into a 9:16 vertical (`cam_top` / `game_top` / `side`).
 - **Library** — saved clips with metadata, download / delete.
 - **Settings** — enter API keys (encrypted in `localStorage`), pick Gemini model, YouTube OAuth connect, TikTok cookie import, and trigger cleanup.
+- **Upload Time Suggestion** — tooltip on upload buttons shows optimal posting times (WIB) with countdown and visual timeline.
 
 ### Content Types
 
@@ -259,8 +266,9 @@ autoclipper/
   hooks.py             # hook text overlay rendering
   trending_youtube.py  # real YouTube trending (mostPopular + category filter)
   youtube_uploader.py  # YouTube OAuth upload
-  tiktok_uploader.py   # TikTok upload via Playwright (cookie-based)
-  pipeline.py          # orchestration
+  tiktok_uploader.py   # TikTok upload via Patchright (cookie-based, best-effort)
+  voiceover.py         # Voice-over engines (Kokoro, Edge TTS, Gemini TTS)
+  pipeline.py          # orchestration (incremental clip generation)
   app.py               # FastAPI server + job queue + all endpoints
 dashboard/
   src/
@@ -268,7 +276,8 @@ dashboard/
     api.js
     components/        # SubmitForm, TrendingPage, ClipGrid, SubtitleEditor,
                        # HookModal, TranslateModal, YouTubeSettings, TikTokSettings,
-                       # TikTokUploadModal, SettingsPage, ...
+                       # TikTokUploadModal, YouTubeUploadModal, UploadTimeSuggestion,
+                       # SettingsPage, ...
 ```
 
 ## Roadmap
@@ -284,6 +293,9 @@ dashboard/
 - [x] Enhance — AI-powered clip enhancement (hook + voice-over)
 - [x] Output auto-cleanup (`JOB_RETENTION_HOURS`)
 - [x] Gaming cam + gameplay split from a single video (YouTube URL or upload) → 9:16
+- [x] Incremental clip generation (clips appear one-by-one as processed)
+- [x] Upload time suggestion tooltip (optimal posting times WIB)
+- [x] Full HD reframing (1080×1920 for landscape sources)
 - [ ] Uploaded-clips tracking page (views + links per platform)
 
 ## Security

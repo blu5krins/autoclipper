@@ -467,16 +467,6 @@ export async function tiktokConnect(cookies) {
   return res.json()
 }
 
-export async function tiktokAccount() {
-  const res = await authFetch(`${API_URL}/api/tiktok/account`)
-  if (!res.ok) {
-    let detail = ''
-    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
-    throw new Error(`TikTok account failed (${res.status}) ${detail}`)
-  }
-  return res.json()
-}
-
 export async function tiktokUpload(payload) {
   const res = await authFetch(`${API_URL}/api/tiktok/upload`, {
     method: 'POST',

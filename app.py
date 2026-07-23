@@ -15,6 +15,7 @@ import logging
 import os
 from typing import Optional
 import shutil
+import threading
 import time
 import uuid
 
@@ -175,19 +176,37 @@ class SubtitleRequest(BaseModel):
 
 
 # --- Job runner -----------------------------------------------------------
-def _run_pipeline_sync(job_id: str, source: str, output_dir: str, opts: dict):
+def _run_pipeline_sync(job_id: str, source: str, output_dir: str, opts: dict, on_clip=None):
     _current_job_id.set(job_id)
-    return pipeline.run(source, output_dir=output_dir, **opts)
+    return pipeline.run(source, output_dir=output_dir, on_clip=on_clip, **opts)
 
 
 async def _run_job(job_id: str, source: str, opts: dict):
     job = jobs[job_id]
     output_dir = os.path.join(config.OUTPUT_ROOT, job_id)
+    # Pre-populate result so incremental clips can be streamed via polling.
+    job["result"] = {
+        "title": None,
+        "source": source,
+        "job_id": job_id,
+        "video_file": None,
+        "language": None,
+        "duration": None,
+        "clips": [],
+        "elapsed_seconds": 0,
+    }
+    lock = threading.Lock()
+
+    def on_clip_ready(clip, index, total):
+        with lock:
+            job["result"]["clips"].append({**clip, "index": index})
+            job["result"]["title"] = job["result"].get("title")  # will be set later
+
     try:
         async with _semaphore:
             job["status"] = "processing"
             result = await asyncio.to_thread(
-                _run_pipeline_sync, job_id, source, output_dir, opts
+                _run_pipeline_sync, job_id, source, output_dir, opts, on_clip=on_clip_ready
             )
         job["result"] = result
         job["status"] = "completed"
@@ -1481,7 +1500,7 @@ async def tiktok_connect(
     req: TikTokConnectRequest, current: User = Depends(get_current_user)
 ):
     """Import TikTok cookies and fetch account info."""
-    from autoclipper.tiktok_uploader import parse_cookies, validate_tiktok_cookies, fetch_account_info
+    from autoclipper.tiktok_uploader import parse_cookies, validate_tiktok_cookies
 
     try:
         cookies = parse_cookies(req.cookies)
@@ -1503,35 +1522,7 @@ async def tiktok_connect(
         session.add(db_user)
         session.commit()
 
-    # Fetch account info to verify cookies work
-    try:
-        info = await fetch_account_info(req.cookies)
-    except Exception as e:
-        # Cookies stored but can't verify — still success
-        logger.warning("TikTok account info fetch failed: %s", e)
-        info = None
-
-    return {"ok": True, "authenticated": True, "account": info}
-
-
-@app.get("/api/tiktok/account")
-async def tiktok_account(current: User = Depends(get_current_user)):
-    """Fetch connected TikTok account info."""
-    from autoclipper.tiktok_uploader import fetch_account_info
-
-    with user_db.Session(user_db.engine) as session:
-        db_user = session.get(User, current.id)
-        if db_user is None:
-            raise HTTPException(status_code=404, detail="User not found")
-        cookies = user_db.load_tiktok_cookies(db_user)
-        if not cookies:
-            raise HTTPException(status_code=401, detail="TikTok not connected")
-
-    try:
-        info = await fetch_account_info(cookies)
-        return info
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch TikTok account: {e}")
+    return {"ok": True, "authenticated": True}
 
 
 @app.post("/api/tiktok/upload")

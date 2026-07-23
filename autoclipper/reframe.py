@@ -319,7 +319,13 @@ def reframe_clip(input_video: str, output_video: str, use_yolo: bool = True) -> 
     scenes, fps = _detect_scenes(input_video)
     strategies = _analyze_strategies(input_video, scenes)
 
-    out_h = src_h
+    # For horizontal→vertical: use source WIDTH as output HEIGHT (taller output).
+    # For already-vertical: keep source height as-is.
+    is_landscape = src_w > src_h
+    if is_landscape:
+        out_h = src_w   # e.g. 1920 from a 1920x1080 source
+    else:
+        out_h = src_h   # already vertical, keep height
     out_w = int(out_h * VERTICAL_ASPECT)
     if out_w % 2:
         out_w += 1

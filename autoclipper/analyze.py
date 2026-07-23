@@ -1,8 +1,20 @@
 """Viral moment detection using Google Gemini."""
 import json
+import re
 
 from . import config
 from .utils import logger
+
+
+def _repair_json(text: str) -> str:
+    """Fix common Gemini JSON issues: missing commas between array elements."""
+    # Insert missing comma between } and { (objects in an array)
+    text = re.sub(r'\}\s*\{', '}, {', text)
+    # Insert missing comma between ] and [ (arrays in an array)
+    text = re.sub(r'\]\s*\[', '], [', text)
+    # Remove trailing commas before ] or }
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+    return text
 
 
 def _build_transcript_text(transcript: dict) -> str:
@@ -114,8 +126,12 @@ def _parse_clips(raw: str) -> list:
 
     try:
         data = json.loads(text)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Could not parse Gemini response as JSON: {e}\nRaw: {raw[:500]}")
+    except json.JSONDecodeError:
+        repaired = _repair_json(text)
+        try:
+            data = json.loads(repaired)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Could not parse Gemini response as JSON: {e}\nRaw: {raw[:500]}")
 
     if isinstance(data, list):
         return data

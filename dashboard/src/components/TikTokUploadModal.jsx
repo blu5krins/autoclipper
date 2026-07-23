@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Send } from 'lucide-react'
 import { tiktokUpload, tiktokStatus } from '../api.js'
+import UploadTimeSuggestion from './UploadTimeSuggestion.jsx'
 
 export default function TikTokUploadModal({ source, onClose, onDone }) {
   // source: { jobId?, name?, filename, title, description }
@@ -126,6 +127,8 @@ export default function TikTokUploadModal({ source, onClose, onDone }) {
             </div>
 
             {error && <p className="text-sm text-red-300 mb-2">{error}</p>}
+
+            <UploadTimeSuggestion platform="tiktok" />
 
             <button
               onClick={submit}

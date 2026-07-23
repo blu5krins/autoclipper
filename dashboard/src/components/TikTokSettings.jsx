@@ -1,17 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { CheckCircle2, AlertCircle, Link2, LogOut, Upload } from 'lucide-react'
-import { tiktokStatus, tiktokConnect, tiktokAccount, tiktokLogout } from '../api.js'
-
-function formatCount(n) {
-  const num = Number(n || 0)
-  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
-  if (num >= 1_000) return (num / 1_000).toFixed(1).replace(/\.0$/, '') + 'K'
-  return String(num)
-}
+import { tiktokStatus, tiktokConnect, tiktokLogout } from '../api.js'
 
 export default function TikTokSettings() {
   const [status, setStatus] = useState({ authenticated: false })
-  const [account, setAccount] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -23,12 +15,6 @@ export default function TikTokSettings() {
     try {
       const s = await tiktokStatus()
       setStatus(s)
-      if (s.authenticated) {
-        try {
-          const info = await tiktokAccount()
-          setAccount(info)
-        } catch { /* account info optional */ }
-      }
     } catch (e) {
       setError(e.message)
     } finally {
@@ -47,8 +33,7 @@ export default function TikTokSettings() {
     setBusy(true)
     setError('')
     try {
-      const result = await tiktokConnect(text)
-      setAccount(result.account || null)
+      await tiktokConnect(text)
       setCookieText('')
       setShowImport(false)
       await load()
@@ -65,7 +50,6 @@ export default function TikTokSettings() {
     setError('')
     try {
       await tiktokLogout()
-      setAccount(null)
       await load()
     } catch (e) {
       setError(e.message)
@@ -134,7 +118,6 @@ export default function TikTokSettings() {
             </div>
           </div>
 
-          {/* Cookie import panel */}
           {showImport && !status.authenticated && (
             <div className="mt-3 space-y-2">
               <div className="flex gap-2">
@@ -153,7 +136,7 @@ export default function TikTokSettings() {
                   disabled={busy || !cookieText.trim()}
                   className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-[#fe2c55] hover:bg-[#e02455] text-white transition-colors disabled:opacity-50"
                 >
-                  {busy ? 'Connecting…' : 'Save & Verify'}
+                  {busy ? 'Connecting…' : 'Save Cookies'}
                 </button>
                 <label className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-300 cursor-pointer transition-colors">
                   <Upload size={13} /> Import File
@@ -170,52 +153,6 @@ export default function TikTokSettings() {
                 Supported: Cookie-Editor JSON export or Netscape cookies.txt format.
                 Cookies expire after ~30 days — re-import when needed.
               </p>
-            </div>
-          )}
-
-          {/* Account info card */}
-          {status.authenticated && account && (
-            <div className="mt-3 bg-black/30 rounded-lg border border-white/5 p-3">
-              <div className="flex items-center gap-3">
-                {account.avatar && (
-                  <img
-                    src={account.avatar}
-                    alt={account.nickname}
-                    className="w-12 h-12 rounded-full border border-white/10 object-cover"
-                  />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-zinc-100 truncate">{account.nickname}</span>
-                    <span className="text-xs text-zinc-500">@{account.unique_id}</span>
-                    {account.verified && (
-                      <CheckCircle2 size={14} className="text-[#fe2c55] shrink-0" />
-                    )}
-                  </div>
-                  {account.private_account && (
-                    <span className="text-[10px] text-amber-400 uppercase">Private Account</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3 mt-3">
-                <div className="text-center">
-                  <div className="text-sm font-bold text-zinc-100">{formatCount(account.follower_count)}</div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Followers</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-sm font-bold text-zinc-100">{formatCount(account.video_count)}</div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Videos</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-sm font-bold text-zinc-100">{formatCount(account.likes_count)}</div>
-                  <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Likes</div>
-                </div>
-              </div>
-
-              {account.signature && (
-                <p className="text-[11px] text-zinc-500 mt-2 line-clamp-2 leading-relaxed">{account.signature}</p>
-              )}
             </div>
           )}
 
