@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Download, Type, FileText, Bookmark, Sparkles, Youtube, Users } from 'lucide-react'
+import { Download, Type, FileText, Bookmark, Sparkles, Youtube, Users, Facebook } from 'lucide-react'
 import { fileUrl, saveToLibrary, applyHook, hookPreview, API_URL } from '../api.js'
 import SubtitleEditor from './SubtitleEditor.jsx'
 import YouTubeUploadModal from './YouTubeUploadModal.jsx'
 import TikTokUploadModal from './TikTokUploadModal.jsx'
+import FacebookUploadModal from './FacebookUploadModal.jsx'
 import ChatSplitModal from './ChatSplitModal.jsx'
 
 export default function ClipGrid({ jobId, clips, onApply }) {
@@ -29,6 +30,7 @@ function ClipCard({ jobId, clip, onApply }) {
   const [hooking, setHooking] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [tiktokUploading, setTiktokUploading] = useState(false)
+  const [facebookUploading, setFacebookUploading] = useState(false)
   const [splitting, setSplitting] = useState(false)
   const [splitInfo, setSplitInfo] = useState(null) // { name, clip } after auto-save
   const url = fileUrl(jobId, clip.file)
@@ -163,6 +165,13 @@ function ClipCard({ jobId, clip, onApply }) {
             TikTok
           </button>
           <button
+            onClick={() => setFacebookUploading(true)}
+            className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-[#1877f2]/15 text-[#1877f2]
+                       hover:bg-[#1877f2]/25 transition-colors flex items-center justify-center gap-1"
+          >
+            <Facebook size={13} /> FB
+          </button>
+          <button
             onClick={handleSplit}
             disabled={splitting}
             className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-cyan-500/15 text-cyan-300
@@ -223,6 +232,19 @@ function ClipCard({ jobId, clip, onApply }) {
           }}
           onClose={() => setTiktokUploading(false)}
           onDone={() => setTiktokUploading(false)}
+        />
+      )}
+
+      {facebookUploading && (
+        <FacebookUploadModal
+          source={{
+            jobId,
+            filename: clip.file,
+            title: clip.title,
+            description: clip.description,
+          }}
+          onClose={() => setFacebookUploading(false)}
+          onDone={() => setFacebookUploading(false)}
         />
       )}
 

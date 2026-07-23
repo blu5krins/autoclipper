@@ -83,6 +83,7 @@ class User(SQLModel, table=True):
     youtube_cookies: str | None = None
     youtube_token: str | None = None  # encrypted JSON of the OAuth credentials
     tiktok_cookies: str | None = None  # encrypted JSON of TikTok session cookies
+    facebook_token: str | None = None  # encrypted JSON of Facebook OAuth token
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -182,3 +183,21 @@ def save_tiktok_cookies(user: User, cookies_json: str) -> None:
 def load_tiktok_cookies(user: User) -> Optional[str]:
     """Return the user's TikTok session cookies JSON, decrypted (or None)."""
     return decrypt_value(user.tiktok_cookies)
+
+
+def save_facebook_token(user: User, token_data: dict) -> None:
+    """Encrypt and store the user's Facebook OAuth token (dict serialized to JSON)."""
+    import json
+    user.facebook_token = encrypt_value(json.dumps(token_data))
+
+
+def load_facebook_token(user: User) -> Optional[dict]:
+    """Return the user's Facebook OAuth token dict, decrypted (or None)."""
+    import json
+    raw = decrypt_value(user.facebook_token)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None

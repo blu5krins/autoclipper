@@ -499,6 +499,94 @@ export async function tiktokLogout() {
   return res.json()
 }
 
+// ── Facebook Pages ─────────────────────────────────────────────────────────
+
+export async function facebookStatus() {
+  const res = await authFetch(`${API_URL}/api/facebook/status`)
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`Facebook status failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+export async function facebookPages() {
+  const res = await authFetch(`${API_URL}/api/facebook/pages`)
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`Facebook pages failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+export async function facebookAuthUrl(redirectUri) {
+  const res = await authFetch(`${API_URL}/api/facebook/auth_url`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ redirect_uri: redirectUri }),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`Facebook auth URL failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+export async function facebookCallback(code, redirectUri) {
+  const res = await authFetch(`${API_URL}/api/facebook/callback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, redirect_uri: redirectUri }),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`Facebook callback failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+export async function facebookUpload(payload) {
+  const res = await authFetch(`${API_URL}/api/facebook/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`Facebook upload failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+export async function facebookAppSettings(appId, appSecret) {
+  const res = await authFetch(`${API_URL}/api/facebook/app_settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`Facebook app settings failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
+export async function facebookLogout() {
+  const res = await authFetch(`${API_URL}/api/facebook/logout`, { method: 'POST' })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.json()).detail || '' } catch { /* ignore */ }
+    throw new Error(`Facebook logout failed (${res.status}) ${detail}`)
+  }
+  return res.json()
+}
+
 export async function applyVoiceOver(payload) {
   const res = await authFetch(`${API_URL}/api/voiceover`, {
     method: 'POST',

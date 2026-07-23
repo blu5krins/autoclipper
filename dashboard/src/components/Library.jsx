@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, Play, Download, Trash2, Youtube, Wand2, Users, Type } from 'lucide-react'
+import { FolderOpen, Play, Download, Trash2, Youtube, Wand2, Users, Type, Facebook } from 'lucide-react'
 import { listLibrary, libraryFileUrl, librarySrtUrl, deleteLibraryClip, deleteLibraryFolder } from '../api.js'
 import YouTubeUploadModal from './YouTubeUploadModal.jsx'
 import TikTokUploadModal from './TikTokUploadModal.jsx'
+import FacebookUploadModal from './FacebookUploadModal.jsx'
 import EnhanceModal from './EnhanceModal.jsx'
 import ChatSplitModal from './ChatSplitModal.jsx'
 import SubtitleEditor from './SubtitleEditor.jsx'
@@ -13,6 +14,7 @@ export default function Library({ onVoiceOver }) {
   const [deleting, setDeleting] = useState(false)
   const [uploading, setUploading] = useState(null) // { name, clip }
   const [tiktokUploading, setTiktokUploading] = useState(null) // { name, clip }
+  const [facebookUploading, setFacebookUploading] = useState(null) // { name, clip }
   const [enhancing, setEnhancing] = useState(null) // { name, clip, hook }
   const [chatSplitting, setChatSplitting] = useState(null) // { name, clip }
   const [subtitling, setSubtitling] = useState(null) // { name, clip }
@@ -181,6 +183,13 @@ export default function Library({ onVoiceOver }) {
                             </svg>
                             TikTok
                           </button>
+                          <button
+                            onClick={() => setFacebookUploading({ name: vid.name, clip: c })}
+                            className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-[#1877f2]/15 text-[#1877f2]
+                                       hover:bg-[#1877f2]/25 transition-colors flex items-center justify-center gap-1"
+                          >
+                            <Facebook size={13} /> FB
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -215,6 +224,19 @@ export default function Library({ onVoiceOver }) {
           }}
           onClose={() => setTiktokUploading(null)}
           onDone={() => setTiktokUploading(null)}
+        />
+      )}
+
+      {facebookUploading && (
+        <FacebookUploadModal
+          source={{
+            name: facebookUploading.name,
+            filename: facebookUploading.clip.file,
+            title: facebookUploading.clip.title,
+            description: facebookUploading.clip.description,
+          }}
+          onClose={() => setFacebookUploading(null)}
+          onDone={() => setFacebookUploading(null)}
         />
       )}
 

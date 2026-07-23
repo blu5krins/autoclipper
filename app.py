@@ -1579,6 +1579,223 @@ async def tiktok_logout(current: User = Depends(get_current_user)):
     return {"ok": True, "authenticated": False}
 
 
+# ── Facebook Pages upload ───────────────────────────────────────────────────
+
+class FacebookAuthRequest(BaseModel):
+    redirect_uri: str
+
+
+class FacebookCallbackRequest(BaseModel):
+    code: str
+    redirect_uri: str
+
+
+class FacebookUploadRequest(BaseModel):
+    job_id: Optional[str] = None
+    name: Optional[str] = None
+    filename: str
+    page_id: str
+    title: str = ""
+    description: str = ""
+    as_reel: bool = False
+
+
+@app.get("/api/facebook/status")
+async def facebook_status(current: User = Depends(get_current_user)):
+    """Check Facebook connection status."""
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            return {"authenticated": False, "configured": False}
+        fb_data = user_db.load_facebook_token(db_user)
+        configured = bool(fb_data and fb_data.get("app_id"))
+        authenticated = bool(fb_data and fb_data.get("user_token"))
+        return {"authenticated": authenticated, "configured": configured}
+
+
+@app.get("/api/facebook/pages")
+async def facebook_pages(current: User = Depends(get_current_user)):
+    """List Facebook Pages the user can manage."""
+    from autoclipper.facebook_uploader import get_pages, is_authenticated as fb_auth
+
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        fb_data = user_db.load_facebook_token(db_user)
+        if not fb_data or not fb_data.get("user_token"):
+            raise HTTPException(status_code=401, detail="Facebook not connected")
+
+    user_token = fb_data["user_token"]
+    try:
+        pages = get_pages(user_token)
+        return {"pages": pages}
+    except Exception as e:
+        ac_logger.error("Failed to fetch Facebook pages: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch pages: {e}")
+
+
+@app.post("/api/facebook/auth_url")
+async def facebook_auth_url(
+    req: FacebookAuthRequest, current: User = Depends(get_current_user)
+):
+    """Generate Facebook Login OAuth URL."""
+    from autoclipper.facebook_uploader import get_auth_url
+
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        fb_data = user_db.load_facebook_token(db_user)
+        if not fb_data or not fb_data.get("app_id"):
+            raise HTTPException(
+                status_code=400,
+                detail="Facebook App ID not configured. Set it in Settings.",
+            )
+
+    url = get_auth_url(fb_data["app_id"], req.redirect_uri)
+    return {"auth_url": url}
+
+
+@app.post("/api/facebook/callback")
+async def facebook_callback(
+    req: FacebookCallbackRequest, current: User = Depends(get_current_user)
+):
+    """Exchange Facebook OAuth code for tokens."""
+    from autoclipper.facebook_uploader import (
+        exchange_code,
+        exchange_long_lived,
+        get_user_info,
+    )
+
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        fb_data = user_db.load_facebook_token(db_user)
+        if not fb_data or not fb_data.get("app_id"):
+            raise HTTPException(status_code=400, detail="Facebook App ID not configured")
+        app_secret = fb_data.get("app_secret", "")
+
+    try:
+        # Exchange code for short-lived token
+        token_data = exchange_code(
+            fb_data["app_id"], app_secret, req.code, req.redirect_uri
+        )
+        user_token = token_data.get("access_token")
+
+        # Exchange for long-lived token
+        long_lived = exchange_long_lived(user_token, fb_data["app_id"], app_secret)
+        long_token = long_lived.get("access_token", user_token)
+        expires_in = long_lived.get("expires_in", 60 * 24 * 60 * 60)  # default 60 days
+
+        # Get user info
+        user_info = get_user_info(long_token)
+
+        # Save token data
+        import time
+        token_save = {
+            "app_id": fb_data["app_id"],
+            "app_secret": app_secret,
+            "user_token": long_token,
+            "user_name": user_info.get("name", "") if user_info else "",
+            "user_id": user_info.get("id", "") if user_info else "",
+            "expires_at": time.time() + expires_in,
+        }
+        user_db.save_facebook_token(db_user, token_save)
+        session.add(db_user)
+        session.commit()
+
+        return {
+            "ok": True,
+            "authenticated": True,
+            "user_name": token_save["user_name"],
+        }
+    except Exception as e:
+        ac_logger.error("Facebook callback error: %s", e)
+        raise HTTPException(status_code=400, detail=f"Token exchange failed: {e}")
+
+
+@app.post("/api/facebook/upload")
+async def facebook_upload(
+    req: FacebookUploadRequest, current: User = Depends(get_current_user)
+):
+    """Upload a video to a Facebook Page."""
+    from autoclipper.facebook_uploader import upload_video_to_page
+
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        fb_data = user_db.load_facebook_token(db_user)
+        if not fb_data or not fb_data.get("user_token"):
+            raise HTTPException(status_code=401, detail="Facebook not connected")
+
+    # Resolve video file
+    if req.name:
+        video_path = os.path.join(config.OUTPUT_ROOT, "library", req.name, req.filename)
+    elif req.job_id:
+        video_path = os.path.join(config.OUTPUT_ROOT, req.job_id, req.filename)
+    else:
+        raise HTTPException(status_code=400, detail="Either name or job_id is required")
+
+    if not os.path.isfile(video_path):
+        raise HTTPException(status_code=404, detail=f"Video file not found: {req.filename}")
+
+    # Get page access token
+    from autoclipper.facebook_uploader import get_pages
+    pages = get_pages(fb_data["user_token"])
+    page_data = next((p for p in pages if p["id"] == req.page_id), None)
+    if not page_data:
+        raise HTTPException(status_code=404, detail="Page not found or not accessible")
+
+    try:
+        result = upload_video_to_page(
+            video_path=video_path,
+            page_id=req.page_id,
+            page_access_token=page_data["access_token"],
+            title=req.title,
+            description=req.description,
+            as_reel=req.as_reel,
+            user_token=fb_data["user_token"],
+            app_id=fb_data.get("app_id"),
+        )
+        return {"ok": True, **result}
+    except Exception as e:
+        ac_logger.error("Facebook upload error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Facebook upload failed: {e}")
+
+
+@app.post("/api/facebook/app_settings")
+async def facebook_app_settings(
+    app_id: str, app_secret: str, current: User = Depends(get_current_user)
+):
+    """Save Facebook App ID and App Secret."""
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        fb_data = user_db.load_facebook_token(db_user) or {}
+        fb_data["app_id"] = app_id
+        fb_data["app_secret"] = app_secret
+        user_db.save_facebook_token(db_user, fb_data)
+        session.add(db_user)
+        session.commit()
+    return {"ok": True}
+
+
+@app.post("/api/facebook/logout")
+async def facebook_logout(current: User = Depends(get_current_user)):
+    """Disconnect Facebook."""
+    with user_db.Session(user_db.engine) as session:
+        db_user = session.get(User, current.id)
+        if db_user is not None:
+            db_user.facebook_token = None
+            session.add(db_user)
+            session.commit()
+    return {"ok": True, "authenticated": False}
+
+
 class SaveLibraryRequest(BaseModel):
     job_id: str
     filename: str
