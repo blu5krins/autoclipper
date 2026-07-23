@@ -117,7 +117,7 @@ def build_gaming_video(source, cam_box, game_box, layout="cam_top",
     cmd = [
         "ffmpeg", "-y", "-i", source,
         "-filter_complex", filter_complex,
-        "-map", out_label,
+        "-map", out_label, "-map", "0:a?",
         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
         "-threads", "0",
         "-pix_fmt", "yuv420p",
