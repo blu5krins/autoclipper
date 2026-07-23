@@ -44,7 +44,7 @@ Ships as a **FastAPI backend** with an async job queue and a **React dashboard**
 ### 1. Clone & configure
 
 ```bash
-git clone https://github.com/your-username/autoclipper.git
+git clone https://github.com/blu5krins/autoclipper.git
 cd autoclipper
 cp .env.example .env
 ```
@@ -112,10 +112,11 @@ To enable uploading clips to Facebook Pages:
 5. Click **Connect** to authorize with Facebook Login
 6. Select which Page to upload to
 
-Required permissions: `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `publish_video`
+Required permissions: `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `publish_video`, `business_management`
 
-> **Note:** Pages must be created directly on Facebook (not via Meta Business Suite)
-> to appear in the API. The redirect URI must match **exactly** (including trailing
+> **Note:** `business_management` is required for Pages managed by a Facebook Business
+> Account/Portfolio. Pages created directly on Facebook (not via Business Suite) may
+> work without it. The redirect URI must match **exactly** (including trailing
 > slash and `https` vs `http`).
 
 ## Local Development (without Docker)
@@ -247,6 +248,7 @@ Async FastAPI server with a bounded job queue (semaphore, `MAX_CONCURRENT_JOBS`)
 | `GEMINI_API_KEY` | — | Required. Gemini for viral detection + trending ideas. |
 | `YOUTUBE_API_KEY` | — | YouTube Data API v3 key for trending + view counts. |
 | `GROQ_API_KEY` | — | Required. Groq Whisper transcription. |
+| `AUTOCLIPPER_SECRET` | — | **Required in production.** Long random string for JWT signing + API key encryption. If unset, an ephemeral key is used and stored keys won't survive a restart. |
 | `GEMINI_MODEL` | `gemini-3.5-flash` | Gemini model (e.g. `gemini-3.5-flash`, `gemini-3-flash`). |
 | `GROQ_WHISPER_MODEL` | `whisper-large-v3-turbo` | Whisper model (Groq cloud). |
 | `YOUTUBE_REGION` | `ID` | Default region for trending. |
@@ -325,7 +327,7 @@ Contributions are welcome!
 4. Keep `.env` and secrets out of your commits.
 5. Open a pull request describing your change.
 
-Please file bugs and feature requests via [GitHub Issues](https://github.com/your-username/autoclipper/issues).
+Please file bugs and feature requests via [GitHub Issues](https://github.com/blu5krins/autoclipper/issues).
 
 ## License
 
